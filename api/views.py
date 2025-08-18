@@ -2,7 +2,7 @@ from django.db.models import OuterRef, Subquery
 from django.shortcuts import render
 from rest_framework.viewsets import ModelViewSet
 from users.models import CustomUser
-from .serializers import BrandSerializer, CategorySerializer, SizeSerializer, WareSerializer, WareVariantSerializer, BatchSerializer, ImageSerializer,CustomUserSerializer
+from .serializers import BrandSerializer, CategorySerializer, SizeSerializer, WareSerializer, WareVariantSerializer, BatchSerializer, ImageSerializer,CustomUserSerializer, PromoteUserSerializer
 from inventory.models import Brand, Category, Size, Ware, WareVariant, Batch, Image
 from rest_framework.response import Response
 from rest_framework import status, viewsets
@@ -99,3 +99,12 @@ class ImageViewSet(ModelViewSet):
 class UserViewSet(ModelViewSet):
     queryset = CustomUser.objects.all()
     serializer_class = CustomUserSerializer
+    permission_classes = [IsAdminOrReadOnly]
+    
+    @action(detail=True, methods=["post"], permission_classes=[IsAdminOrReadOnly])
+    def set_role(self, request, pk=None):
+        user = self.get_object()
+        ser = PromoteUserSerializer(user, data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        ser.save()
+        return Response({"detail": "Role updated", "user": CustomUserSerializer(user).data})
