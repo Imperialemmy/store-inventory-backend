@@ -2,6 +2,7 @@ from django.db.models import Max
 from rest_framework import serializers
 from inventory.models import Brand, Category, Size, Ware, WareVariant, Batch, Image
 from users.models import CustomUser
+from django.db import transaction
 
 
 class CustomUserSerializer(serializers.ModelSerializer):
@@ -132,3 +133,27 @@ class ImageSerializer(serializers.ModelSerializer):
     class Meta:
         model = Image
         fields = ["id", "ware", "image", "alt_text", "order"]
+
+
+class PromoteUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CustomUser
+        fields = ["role"]  # only allow changing role via this endpoint
+
+    def validate_role(self, value):
+        if value not in ("user", "admin"):
+            raise serializers.ValidationError("Invalid role.")
+        return value
+
+    def update(self, instance, validated_data):
+        with transaction.atomic():
+            new_role = validated_data["role"]
+            # Optional: prevent demoting the last admin
+            if instance.role == "admin" and new_role == "user":
+                if not CustomUser.objects.exclude(id=instance.id).filter(role="admin").exists():
+                    raise serializers.ValidationError("Cannot demote the last admin.")
+            instance.role = new_role
+            # Keep is_staff in sync with role (but don't touch is_superuser here)
+            instance.is_staff = (new_role == "admin")
+            instance.save(update_fields=["role", "is_staff"])
+            return instance
