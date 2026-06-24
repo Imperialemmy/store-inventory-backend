@@ -4,8 +4,63 @@ from inventory.models import (
     Brand, Category, Size, Ware, WareVariant, Batch, Image,
     Supplier, Warehouse, AuditLog,
 )
+from customers.models import Customer, CustomerTag
 from users.models import CustomUser
 from django.db import transaction
+
+
+class CustomerTagSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CustomerTag
+        fields = ["id", "name"]
+
+
+class CustomerSerializer(serializers.ModelSerializer):
+    # Read tags as full objects; write them as a list of names so the
+    # client can simply send ["VIP", "Special Pricing"].
+    tags = CustomerTagSerializer(many=True, read_only=True)
+    tag_names = serializers.ListField(
+        child=serializers.CharField(max_length=50), write_only=True, required=False
+    )
+    available_credit = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    customer_type_display = serializers.CharField(source="get_customer_type_display", read_only=True)
+
+    class Meta:
+        model = Customer
+        fields = [
+            "id", "name", "customer_type", "customer_type_display", "phone_number",
+            "email", "address", "city", "credit_limit", "outstanding_balance",
+            "available_credit", "tags", "tag_names", "notes", "is_active",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
+
+    def _resolve_tags(self, tag_names):
+        tags = []
+        for raw in tag_names:
+            name = raw.strip()
+            if not name:
+                continue
+            tag, _ = CustomerTag.objects.get_or_create(name=name)
+            tags.append(tag)
+        return tags
+
+    def create(self, validated_data):
+        tag_names = validated_data.pop("tag_names", None)
+        validated_data["user"] = self.context["request"].user
+        customer = Customer.objects.create(**validated_data)
+        if tag_names is not None:
+            customer.tags.set(self._resolve_tags(tag_names))
+        return customer
+
+    def update(self, instance, validated_data):
+        tag_names = validated_data.pop("tag_names", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if tag_names is not None:
+            instance.tags.set(self._resolve_tags(tag_names))
+        return instance
 
 
 class SupplierSerializer(serializers.ModelSerializer):
