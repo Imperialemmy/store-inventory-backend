@@ -1,8 +1,33 @@
 from django.db.models import Max
 from rest_framework import serializers
-from inventory.models import Brand, Category, Size, Ware, WareVariant, Batch, Image
+from inventory.models import (
+    Brand, Category, Size, Ware, WareVariant, Batch, Image,
+    Supplier, Warehouse, AuditLog,
+)
 from users.models import CustomUser
 from django.db import transaction
+
+
+class SupplierSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Supplier
+        fields = "__all__"
+
+
+class WarehouseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Warehouse
+        fields = "__all__"
+
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source="user.username", read_only=True)
+
+    class Meta:
+        model = AuditLog
+        fields = ["id", "user", "username", "action", "model_name",
+                  "object_id", "object_repr", "changes", "timestamp"]
+        read_only_fields = fields
 
 
 class CustomUserSerializer(serializers.ModelSerializer):
@@ -38,12 +63,18 @@ class SizeSerializer(serializers.ModelSerializer):
 
 class BatchSerializer(serializers.ModelSerializer):
     variant = serializers.PrimaryKeyRelatedField(queryset=WareVariant.objects.all())
-    # variant_detail = WareVariantSerializer(source='variant', read_only=True)
+    warehouse = serializers.PrimaryKeyRelatedField(
+        queryset=Warehouse.objects.all(), required=False, allow_null=True)
+    supplier = serializers.PrimaryKeyRelatedField(
+        queryset=Supplier.objects.all(), required=False, allow_null=True)
+    warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
+    supplier_name = serializers.CharField(source="supplier.name", read_only=True)
 
     class Meta:
         model = Batch
-        fields = ["id", "variant", "quantity", "expiry_date",
-                  "manufacturing_date", "lot_number", "is_expired",'created_at','updated_at']
+        fields = ["id", "variant", "warehouse", "warehouse_name", "supplier", "supplier_name",
+                  "quantity", "expiry_date", "manufacturing_date", "lot_number",
+                  "is_expired", 'created_at', 'updated_at']
         read_only_fields = ["created_at", "updated_at"]
 
 class WareVariantSerializer(serializers.ModelSerializer):
@@ -52,15 +83,22 @@ class WareVariantSerializer(serializers.ModelSerializer):
     ware_name = serializers.CharField(source="ware.name", read_only=True)
     size_detail = SizeSerializer(source="size", read_only=True)  # Full size details for GET
     stock = serializers.SerializerMethodField()
+    stock_by_warehouse = serializers.SerializerMethodField()
+    is_low_stock = serializers.BooleanField(read_only=True)
     last_updated = serializers.SerializerMethodField()
     batches = BatchSerializer(many=True, read_only=True)
 
     class Meta:
         model = WareVariant
-        fields = ["id", "ware", "ware_name", "size", "size_detail", "price", "is_available", "stock",'last_updated',"batches"]
+        fields = ["id", "ware", "ware_name", "size", "size_detail", "price",
+                  "reorder_point", "is_available", "stock", "stock_by_warehouse",
+                  "is_low_stock", 'last_updated', "batches"]
 
     def get_stock(self, obj):
         return obj.get_stock()
+
+    def get_stock_by_warehouse(self, obj):
+        return obj.stock_by_warehouse()
 
     def validate(self, data):
         """
@@ -141,7 +179,8 @@ class PromoteUserSerializer(serializers.ModelSerializer):
         fields = ["role"]  # only allow changing role via this endpoint
 
     def validate_role(self, value):
-        if value not in ("user", "admin"):
+        valid_roles = {choice[0] for choice in CustomUser.ROLE_CHOICES}
+        if value not in valid_roles:
             raise serializers.ValidationError("Invalid role.")
         return value
 
@@ -149,7 +188,7 @@ class PromoteUserSerializer(serializers.ModelSerializer):
         with transaction.atomic():
             new_role = validated_data["role"]
             # Optional: prevent demoting the last admin
-            if instance.role == "admin" and new_role == "user":
+            if instance.role == "admin" and new_role != "admin":
                 if not CustomUser.objects.exclude(id=instance.id).filter(role="admin").exists():
                     raise serializers.ValidationError("Cannot demote the last admin.")
             instance.role = new_role

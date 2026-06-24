@@ -4,6 +4,9 @@ from django.db import models
 class CustomUser(AbstractUser):
     ROLE_CHOICES = (
         ('admin', 'Admin'),
+        ('manager', 'Manager'),
+        ('sales', 'Sales Staff'),
+        ('warehouse', 'Warehouse Staff'),
         ('user', 'User'),
     )
     username = models.CharField(unique=True, max_length=150)

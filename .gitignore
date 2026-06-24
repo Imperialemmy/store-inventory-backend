@@ -15,3 +15,6 @@ __pycache__/
 # Idea files
 .idea/
 *.xml
+
+# Local SQLite dev database
+db.sqlite3

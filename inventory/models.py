@@ -4,6 +4,37 @@ from users.models import CustomUser
 from django.utils.timezone import now
 
 
+class Supplier(models.Model):
+    """A supplier/vendor that stock is received from."""
+    name = models.CharField(max_length=150, unique=True)
+    contact_name = models.CharField(max_length=150, blank=True, null=True)
+    phone_number = models.CharField(max_length=20, blank=True, null=True)
+    email = models.EmailField(blank=True, null=True)
+    address = models.TextField(blank=True, null=True)
+    lead_time_days = models.PositiveIntegerField(
+        default=0,
+        help_text="Typical number of days between placing an order and receiving stock.",
+    )
+    notes = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+
+class Warehouse(models.Model):
+    """A physical location/warehouse where stock is held."""
+    name = models.CharField(max_length=150, unique=True)
+    address = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
 
 class Brand(models.Model):
     name = models.CharField(max_length=100, unique=True)
@@ -45,6 +76,10 @@ class WareVariant(models.Model):
     ware = models.ForeignKey('Ware', related_name='variants', on_delete=models.CASCADE)
     size = models.ForeignKey('Size', on_delete=models.CASCADE)
     price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    reorder_point = models.PositiveIntegerField(
+        default=0,
+        help_text="Stock level at or below which the variant is flagged for reordering.",
+    )
     is_available = models.BooleanField(default=True)
 
     class Meta:
@@ -56,17 +91,44 @@ class WareVariant(models.Model):
     def update_availability(self):
         """ Update the availability based on stock count. """
         self.is_available = self.get_stock() > 0
-        self.save()
+        self.save(update_fields=["is_available"])
 
-    def get_stock(self):
-        """ Efficiently calculate total stock for this variant. """
-        stock = self.batches.aggregate(total=Sum('quantity'))['total']
-        return stock or 0  # Return 0 if there are no batches
+    def get_stock(self, warehouse=None):
+        """ Efficiently calculate total stock for this variant.
+
+        Pass a ``warehouse`` (instance or id) to scope the count to a single
+        location; otherwise stock is summed across all warehouses.
+        """
+        batches = self.batches.all()
+        if warehouse is not None:
+            batches = batches.filter(warehouse=warehouse)
+        return batches.aggregate(total=Sum('quantity'))['total'] or 0
+
+    def stock_by_warehouse(self):
+        """ Return a list of {warehouse, stock} totals per location. """
+        return list(
+            self.batches.values('warehouse', 'warehouse__name')
+            .annotate(stock=Sum('quantity'))
+            .order_by('warehouse__name')
+        )
+
+    @property
+    def is_low_stock(self):
+        """ True when total stock has fallen to or below the reorder point. """
+        return self.get_stock() <= self.reorder_point
 
 
 
 class Batch(models.Model):
     variant = models.ForeignKey(WareVariant, related_name='batches', on_delete=models.CASCADE)
+    warehouse = models.ForeignKey(
+        Warehouse, related_name='batches', on_delete=models.PROTECT,
+        null=True, blank=True,
+    )
+    supplier = models.ForeignKey(
+        Supplier, related_name='batches', on_delete=models.SET_NULL,
+        null=True, blank=True,
+    )
     quantity = models.PositiveIntegerField(default=0)
     expiry_date = models.DateField()
     manufacturing_date = models.DateField(null=True, blank=True)
@@ -90,6 +152,35 @@ class Image(models.Model):
     image = models.ImageField(upload_to='ware_images/')
     alt_text = models.CharField(max_length=255, blank=True, null=True)
     order = models.PositiveIntegerField(default=0)
+
+
+class AuditLog(models.Model):
+    """Append-only record of who changed what and when, across modules."""
+    CREATE = 'create'
+    UPDATE = 'update'
+    DELETE = 'delete'
+    ACTION_CHOICES = (
+        (CREATE, 'Create'),
+        (UPDATE, 'Update'),
+        (DELETE, 'Delete'),
+    )
+
+    user = models.ForeignKey(
+        CustomUser, related_name='audit_logs', on_delete=models.SET_NULL,
+        null=True, blank=True,
+    )
+    action = models.CharField(max_length=10, choices=ACTION_CHOICES)
+    model_name = models.CharField(max_length=100)
+    object_id = models.CharField(max_length=64, blank=True, null=True)
+    object_repr = models.CharField(max_length=255, blank=True, null=True)
+    changes = models.JSONField(blank=True, null=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        return f"{self.timestamp:%Y-%m-%d %H:%M} {self.action} {self.model_name}#{self.object_id}"
 
 
 
