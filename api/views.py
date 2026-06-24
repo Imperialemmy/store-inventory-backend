@@ -6,11 +6,13 @@ from .serializers import (
     BrandSerializer, CategorySerializer, SizeSerializer, WareSerializer,
     WareVariantSerializer, BatchSerializer, ImageSerializer, CustomUserSerializer,
     PromoteUserSerializer, SupplierSerializer, WarehouseSerializer, AuditLogSerializer,
+    CustomerSerializer, CustomerTagSerializer,
 )
 from inventory.models import (
     Brand, Category, Size, Ware, WareVariant, Batch, Image,
     Supplier, Warehouse, AuditLog,
 )
+from customers.models import Customer, CustomerTag
 from rest_framework.response import Response
 from rest_framework import status, viewsets
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
@@ -165,6 +167,34 @@ class ImageViewSet(AuditLogMixin, ModelViewSet):
     permission_classes = [IsAdminOrReadOnly]
     queryset = Image.objects.all()
     serializer_class = ImageSerializer
+
+
+class CustomerViewSet(AuditLogMixin, ModelViewSet, BulkDeleteMixin):
+    queryset = Customer.objects.prefetch_related("tags").all()
+    serializer_class = CustomerSerializer
+    permission_classes = [IsAdminOrReadOnly]
+    pagination_class = CustomPagination
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ["customer_type", "city", "is_active", "tags"]
+    search_fields = ["name", "phone_number", "email", "city"]
+    ordering_fields = ["name", "outstanding_balance", "credit_limit", "created_at"]
+    ordering = ["name"]
+
+    def get_queryset(self):
+        qs = Customer.objects.prefetch_related("tags").all()
+        # ?has_balance=true narrows to customers who currently owe money.
+        has_balance = self.request.query_params.get("has_balance")
+        if has_balance in ("true", "1"):
+            qs = qs.filter(outstanding_balance__gt=0)
+        return qs
+
+
+class CustomerTagViewSet(AuditLogMixin, ModelViewSet, BulkDeleteMixin):
+    queryset = CustomerTag.objects.all()
+    serializer_class = CustomerTagSerializer
+    permission_classes = [IsAdminOrReadOnly]
+    filter_backends = [DjangoFilterBackend, SearchFilter]
+    search_fields = ["name"]
 
 
 class AuditLogViewSet(ReadOnlyModelViewSet):

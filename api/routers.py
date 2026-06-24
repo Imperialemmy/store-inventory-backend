@@ -4,6 +4,7 @@ from .views import (
     BrandViewSet, CategoryViewSet, SizeViewSet, WareViewSet, WareVariantViewSet,
     BatchViewSet, ImageViewSet, UserViewSet,
     SupplierViewSet, WarehouseViewSet, AuditLogViewSet,
+    CustomerViewSet, CustomerTagViewSet,
 )
 
 router = DefaultRouter()
@@ -17,6 +18,8 @@ router.register(r'images', ImageViewSet)
 router.register(r'users', UserViewSet)
 router.register(r'suppliers', SupplierViewSet)
 router.register(r'warehouses', WarehouseViewSet)
+router.register(r'customers', CustomerViewSet)
+router.register(r'customer-tags', CustomerTagViewSet)
 router.register(r'audit-logs', AuditLogViewSet)
 
 urlpatterns = [
