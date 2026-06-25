@@ -7,6 +7,7 @@ from .views import (
     CustomerViewSet, CustomerTagViewSet,
 )
 from sales.views import SaleViewSet, PaymentViewSet
+from expenses.views import ExpenseViewSet, ExpenseCategoryViewSet
 
 router = DefaultRouter()
 router.register(r'brands', BrandViewSet)
@@ -23,6 +24,8 @@ router.register(r'customers', CustomerViewSet)
 router.register(r'customer-tags', CustomerTagViewSet)
 router.register(r'sales', SaleViewSet)
 router.register(r'payments', PaymentViewSet)
+router.register(r'expense-categories', ExpenseCategoryViewSet)
+router.register(r'expenses', ExpenseViewSet)
 router.register(r'audit-logs', AuditLogViewSet)
 
 urlpatterns = [
