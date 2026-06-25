@@ -146,6 +146,7 @@ class WareVariantSerializer(serializers.ModelSerializer):
     class Meta:
         model = WareVariant
         fields = ["id", "ware", "ware_name", "size", "size_detail", "price",
+                  "retail_price", "wholesale_price",
                   "reorder_point", "is_available", "stock", "stock_by_warehouse",
                   "is_low_stock", 'last_updated', "batches"]
 

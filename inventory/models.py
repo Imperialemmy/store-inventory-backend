@@ -76,11 +76,29 @@ class WareVariant(models.Model):
     ware = models.ForeignKey('Ware', related_name='variants', on_delete=models.CASCADE)
     size = models.ForeignKey('Size', on_delete=models.CASCADE)
     price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    retail_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    wholesale_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     reorder_point = models.PositiveIntegerField(
         default=0,
         help_text="Stock level at or below which the variant is flagged for reordering.",
     )
     is_available = models.BooleanField(default=True)
+
+    def save(self, *args, **kwargs):
+        # Keep the legacy single `price` aligned with the retail price so
+        # older reads stay correct now that pricing is dual (wholesale/retail).
+        if self.retail_price:
+            self.price = self.retail_price
+        elif self.price and not self.retail_price:
+            self.retail_price = self.price
+        super().save(*args, **kwargs)
+
+    def price_for(self, customer_type):
+        """Return the wholesale or retail price for a given customer type,
+        falling back to the other price (or legacy price) when unset."""
+        if customer_type == "wholesale" and self.wholesale_price:
+            return self.wholesale_price
+        return self.retail_price or self.price
 
     class Meta:
         unique_together = ('ware', 'size')
