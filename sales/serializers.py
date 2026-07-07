@@ -1,26 +1,22 @@
 from decimal import Decimal
 from rest_framework import serializers
-from inventory.models import WareVariant
+from inventory.models import Product
 from customers.models import Customer
 from .models import Sale, SaleItem, Payment, CreditNote, CreditNoteItem
 from .services import create_sale, create_credit_note, credited_quantity
 
 
 class SaleItemSerializer(serializers.ModelSerializer):
-    variant = serializers.PrimaryKeyRelatedField(queryset=WareVariant.objects.all())
-    variant_label = serializers.SerializerMethodField()
+    product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all())
+    product_name = serializers.CharField(source="product.name", read_only=True)
     line_total = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     returned_quantity = serializers.SerializerMethodField()
 
     class Meta:
         model = SaleItem
-        fields = ["id", "variant", "variant_label", "quantity", "unit_price",
+        fields = ["id", "product", "product_name", "quantity", "unit_price",
                   "line_total", "returned_quantity"]
         extra_kwargs = {"unit_price": {"required": False}}
-
-    def get_variant_label(self, obj):
-        size = obj.variant.size
-        return f"{obj.variant.ware.name} ({size})"
 
     def get_returned_quantity(self, obj):
         return credited_quantity(obj)
@@ -38,11 +34,11 @@ class PaymentSerializer(serializers.ModelSerializer):
 
 class CreditNoteItemSerializer(serializers.ModelSerializer):
     sale_item = serializers.PrimaryKeyRelatedField(queryset=SaleItem.objects.all())
-    variant_label = serializers.CharField(source="sale_item.variant.ware.name", read_only=True)
+    product_name = serializers.CharField(source="sale_item.product.name", read_only=True)
 
     class Meta:
         model = CreditNoteItem
-        fields = ["id", "sale_item", "variant_label", "quantity", "unit_price"]
+        fields = ["id", "sale_item", "product_name", "quantity", "unit_price"]
         read_only_fields = ["unit_price"]
 
 
@@ -96,15 +92,11 @@ class SaleSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         items = validated_data.pop("items")
         request = self.context.get("request")
-        sale = create_sale(
+        return create_sale(
             user=request.user if request else None,
             customer=validated_data["customer"],
             items=[
-                {
-                    "variant": item["variant"],
-                    "quantity": item["quantity"],
-                    "unit_price": item.get("unit_price"),
-                }
+                {"product": item["product"], "quantity": item["quantity"], "unit_price": item.get("unit_price")}
                 for item in items
             ],
             discount=validated_data.get("discount", Decimal("0")),
@@ -112,4 +104,3 @@ class SaleSerializer(serializers.ModelSerializer):
             date=validated_data.get("date"),
             notes=validated_data.get("notes"),
         )
-        return sale

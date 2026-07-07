@@ -1,18 +1,11 @@
 from django.contrib import admin
-from .models import (
-    Brand, Category, Size, Ware, WareVariant, Batch, Image,
-    Supplier, Warehouse, AuditLog,
-)
+from .models import Product, AuditLog
 
-admin.site.register(Brand)
-admin.site.register(Category)
-admin.site.register(Size)
-admin.site.register(Ware)
-admin.site.register(WareVariant)
-admin.site.register(Batch)
-admin.site.register(Image)
-admin.site.register(Supplier)
-admin.site.register(Warehouse)
+
+@admin.register(Product)
+class ProductAdmin(admin.ModelAdmin):
+    list_display = ("name", "price", "stock")
+    search_fields = ("name",)
 
 
 @admin.register(AuditLog)

@@ -50,8 +50,6 @@ INSTALLED_APPS = [
     'users',
     'customers',
     'sales',
-    'expenses',
-    'hr',
     'rest_framework',
     'api',
     'corsheaders',

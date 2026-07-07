@@ -3,7 +3,7 @@ from django.db import models
 from django.utils.timezone import now, localdate
 from users.models import CustomUser
 from customers.models import Customer
-from inventory.models import WareVariant, Batch
+from inventory.models import Product
 
 
 class Sale(models.Model):
@@ -22,7 +22,6 @@ class Sale(models.Model):
     discount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     vat_rate = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("7.5"))
 
-    # Stored totals (recomputed from line items via recalculate()).
     subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     vat_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
@@ -44,7 +43,6 @@ class Sale(models.Model):
             super().save(update_fields=["invoice_number"])
 
     def recalculate(self, persist=True):
-        """Recompute money totals from the current line items."""
         subtotal = sum((item.line_total for item in self.items.all()), Decimal("0"))
         taxable = max(subtotal - self.discount, Decimal("0"))
         vat_amount = (taxable * self.vat_rate / Decimal("100")).quantize(Decimal("0.01"))
@@ -60,7 +58,6 @@ class Sale(models.Model):
 
     @property
     def amount_credited(self):
-        """Total value of credit notes (returns) issued against this sale."""
         total = Decimal("0")
         for note in self.credit_notes.all():
             total += note.amount
@@ -82,33 +79,20 @@ class Sale(models.Model):
 
 class SaleItem(models.Model):
     sale = models.ForeignKey(Sale, related_name="items", on_delete=models.CASCADE)
-    variant = models.ForeignKey(WareVariant, related_name="sale_items", on_delete=models.PROTECT)
+    product = models.ForeignKey(Product, related_name="sale_items", on_delete=models.PROTECT)
     quantity = models.PositiveIntegerField(default=1)
     unit_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     def __str__(self):
-        return f"{self.quantity} x {self.variant} @ {self.unit_price}"
+        return f"{self.quantity} x {self.product} @ {self.unit_price}"
 
     @property
     def line_total(self):
         return (self.unit_price or Decimal("0")) * self.quantity
 
 
-class SaleItemAllocation(models.Model):
-    """Records which batch a sale line drew stock from, so a deleted sale
-    can return the exact quantities to the right batches."""
-    sale_item = models.ForeignKey(SaleItem, related_name="allocations", on_delete=models.CASCADE)
-    batch = models.ForeignKey(Batch, related_name="sale_allocations", on_delete=models.PROTECT)
-    quantity = models.PositiveIntegerField()
-
-
 class CreditNote(models.Model):
-    """A sales return: goods come back, the customer is credited.
-
-    The credited amount is VAT-inclusive (unit price × qty × (1 + VAT rate))
-    but does not pro-rate order-level discounts — acceptable for the small
-    order-level discounts this business uses.
-    """
+    """A sales return: goods come back, the customer is credited (VAT-inclusive)."""
     sale = models.ForeignKey(Sale, related_name="credit_notes", on_delete=models.CASCADE)
     user = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True)
     reason = models.CharField(max_length=255, blank=True, null=True)
