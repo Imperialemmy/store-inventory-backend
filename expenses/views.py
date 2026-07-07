@@ -8,7 +8,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import OrderingFilter, SearchFilter
 
 from api.views import AuditLogMixin, BulkDeleteMixin, CustomPagination
-from users.permissions import IsAdminOrReadOnly
+from users.permissions import ManagerWriteOrReadOnly
 from sales.models import Sale
 from .models import Expense, ExpenseCategory
 from .serializers import ExpenseSerializer, ExpenseCategorySerializer
@@ -21,7 +21,7 @@ def _money(value):
 class ExpenseCategoryViewSet(AuditLogMixin, ModelViewSet, BulkDeleteMixin):
     queryset = ExpenseCategory.objects.all()
     serializer_class = ExpenseCategorySerializer
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [ManagerWriteOrReadOnly]
     filter_backends = [DjangoFilterBackend, SearchFilter]
     search_fields = ["name"]
 
@@ -29,7 +29,7 @@ class ExpenseCategoryViewSet(AuditLogMixin, ModelViewSet, BulkDeleteMixin):
 class ExpenseViewSet(AuditLogMixin, ModelViewSet, BulkDeleteMixin):
     queryset = Expense.objects.select_related("category", "supplier").all()
     serializer_class = ExpenseSerializer
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [ManagerWriteOrReadOnly]
     pagination_class = CustomPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ["category", "payment_method", "supplier", "date"]

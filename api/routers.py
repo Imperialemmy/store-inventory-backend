@@ -4,10 +4,14 @@ from .views import (
     BrandViewSet, CategoryViewSet, SizeViewSet, WareViewSet, WareVariantViewSet,
     BatchViewSet, ImageViewSet, UserViewSet,
     SupplierViewSet, WarehouseViewSet, AuditLogViewSet,
-    CustomerViewSet, CustomerTagViewSet,
+    CustomerViewSet, CustomerTagViewSet, NotificationsView,
 )
-from sales.views import SaleViewSet, PaymentViewSet
+from sales.views import SaleViewSet, PaymentViewSet, CreditNoteViewSet
 from expenses.views import ExpenseViewSet, ExpenseCategoryViewSet
+from hr.views import (
+    EmployeeViewSet, AttendanceViewSet, LeaveViewSet,
+    PayrollRunViewSet, PayslipViewSet,
+)
 
 router = DefaultRouter()
 router.register(r'brands', BrandViewSet)
@@ -24,10 +28,17 @@ router.register(r'customers', CustomerViewSet)
 router.register(r'customer-tags', CustomerTagViewSet)
 router.register(r'sales', SaleViewSet)
 router.register(r'payments', PaymentViewSet)
+router.register(r'credit-notes', CreditNoteViewSet)
 router.register(r'expense-categories', ExpenseCategoryViewSet)
 router.register(r'expenses', ExpenseViewSet)
+router.register(r'employees', EmployeeViewSet)
+router.register(r'attendance', AttendanceViewSet)
+router.register(r'leaves', LeaveViewSet)
+router.register(r'payroll-runs', PayrollRunViewSet)
+router.register(r'payslips', PayslipViewSet)
 router.register(r'audit-logs', AuditLogViewSet)
 
 urlpatterns = [
+    path('notifications/', NotificationsView.as_view(), name='notifications'),
     path('', include(router.urls)),
 ]

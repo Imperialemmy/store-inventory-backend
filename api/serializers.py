@@ -142,13 +142,22 @@ class WareVariantSerializer(serializers.ModelSerializer):
     is_low_stock = serializers.BooleanField(read_only=True)
     last_updated = serializers.SerializerMethodField()
     batches = BatchSerializer(many=True, read_only=True)
+    ware_image = serializers.SerializerMethodField()
 
     class Meta:
         model = WareVariant
-        fields = ["id", "ware", "ware_name", "size", "size_detail", "price",
+        fields = ["id", "ware", "ware_name", "ware_image", "size", "size_detail", "price",
                   "retail_price", "wholesale_price",
                   "reorder_point", "is_available", "stock", "stock_by_warehouse",
                   "is_low_stock", 'last_updated', "batches"]
+
+    def get_ware_image(self, obj):
+        image = obj.ware.ware_images.order_by("order").first()
+        if not image:
+            return None
+        request = self.context.get("request")
+        url = image.image.url
+        return request.build_absolute_uri(url) if request else url
 
     def get_stock(self, obj):
         return obj.get_stock()
@@ -196,12 +205,25 @@ class WareSerializer(serializers.ModelSerializer):
     category_detail = CategorySerializer(source='category', read_only=True)
     size_detail = SizeSerializer(source='size', many=True, read_only=True)
     variants = WareVariantSerializer(many=True, read_only=True)
+    images = serializers.SerializerMethodField()
 
     class Meta:
         model = Ware
         fields = ["id", "user", "name", "brand", "brand_detail", "category", "category_detail",
-                  "description", "size", "size_detail", "created_at", "updated_at", "variants"]
+                  "description", "size", "size_detail", "images", "created_at", "updated_at", "variants"]
         read_only_fields = ["user"]
+
+    def get_images(self, obj):
+        request = self.context.get("request")
+        result = []
+        for image in obj.ware_images.all().order_by("order"):
+            url = image.image.url
+            result.append({
+                "id": image.id,
+                "url": request.build_absolute_uri(url) if request else url,
+                "alt_text": image.alt_text,
+            })
+        return result
 
     def create(self, validated_data):
         validated_data['user'] = self.context['request'].user
