@@ -59,15 +59,23 @@ class Sale(models.Model):
         return self.payments.aggregate(total=models.Sum("amount"))["total"] or Decimal("0")
 
     @property
+    def amount_credited(self):
+        """Total value of credit notes (returns) issued against this sale."""
+        total = Decimal("0")
+        for note in self.credit_notes.all():
+            total += note.amount
+        return total
+
+    @property
     def balance(self):
-        return self.total - self.amount_paid
+        return self.total - self.amount_paid - self.amount_credited
 
     @property
     def payment_status(self):
-        paid = self.amount_paid
-        if paid <= 0:
+        settled = self.amount_paid + self.amount_credited
+        if settled <= 0:
             return self.PENDING
-        if paid >= self.total:
+        if settled >= self.total:
             return self.PAID
         return self.PARTIAL
 
@@ -92,6 +100,40 @@ class SaleItemAllocation(models.Model):
     sale_item = models.ForeignKey(SaleItem, related_name="allocations", on_delete=models.CASCADE)
     batch = models.ForeignKey(Batch, related_name="sale_allocations", on_delete=models.PROTECT)
     quantity = models.PositiveIntegerField()
+
+
+class CreditNote(models.Model):
+    """A sales return: goods come back, the customer is credited.
+
+    The credited amount is VAT-inclusive (unit price × qty × (1 + VAT rate))
+    but does not pro-rate order-level discounts — acceptable for the small
+    order-level discounts this business uses.
+    """
+    sale = models.ForeignKey(Sale, related_name="credit_notes", on_delete=models.CASCADE)
+    user = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True)
+    reason = models.CharField(max_length=255, blank=True, null=True)
+    created_at = models.DateTimeField(default=now)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"CN-{self.pk} on {self.sale}"
+
+    @property
+    def amount(self):
+        vat_factor = Decimal("1") + (self.sale.vat_rate / Decimal("100"))
+        total = Decimal("0")
+        for item in self.items.all():
+            total += item.quantity * item.unit_price * vat_factor
+        return total.quantize(Decimal("0.01"))
+
+
+class CreditNoteItem(models.Model):
+    credit_note = models.ForeignKey(CreditNote, related_name="items", on_delete=models.CASCADE)
+    sale_item = models.ForeignKey(SaleItem, related_name="credited_items", on_delete=models.PROTECT)
+    quantity = models.PositiveIntegerField()
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2)
 
 
 class Payment(models.Model):

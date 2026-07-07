@@ -2,23 +2,28 @@ from decimal import Decimal
 from rest_framework import serializers
 from inventory.models import WareVariant
 from customers.models import Customer
-from .models import Sale, SaleItem, Payment
-from .services import create_sale
+from .models import Sale, SaleItem, Payment, CreditNote, CreditNoteItem
+from .services import create_sale, create_credit_note, credited_quantity
 
 
 class SaleItemSerializer(serializers.ModelSerializer):
     variant = serializers.PrimaryKeyRelatedField(queryset=WareVariant.objects.all())
     variant_label = serializers.SerializerMethodField()
     line_total = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    returned_quantity = serializers.SerializerMethodField()
 
     class Meta:
         model = SaleItem
-        fields = ["id", "variant", "variant_label", "quantity", "unit_price", "line_total"]
+        fields = ["id", "variant", "variant_label", "quantity", "unit_price",
+                  "line_total", "returned_quantity"]
         extra_kwargs = {"unit_price": {"required": False}}
 
     def get_variant_label(self, obj):
         size = obj.variant.size
         return f"{obj.variant.ware.name} ({size})"
+
+    def get_returned_quantity(self, obj):
+        return credited_quantity(obj)
 
 
 class PaymentSerializer(serializers.ModelSerializer):
@@ -31,14 +36,48 @@ class PaymentSerializer(serializers.ModelSerializer):
         read_only_fields = ["created_at"]
 
 
+class CreditNoteItemSerializer(serializers.ModelSerializer):
+    sale_item = serializers.PrimaryKeyRelatedField(queryset=SaleItem.objects.all())
+    variant_label = serializers.CharField(source="sale_item.variant.ware.name", read_only=True)
+
+    class Meta:
+        model = CreditNoteItem
+        fields = ["id", "sale_item", "variant_label", "quantity", "unit_price"]
+        read_only_fields = ["unit_price"]
+
+
+class CreditNoteSerializer(serializers.ModelSerializer):
+    items = CreditNoteItemSerializer(many=True)
+    sale = serializers.PrimaryKeyRelatedField(queryset=Sale.objects.all())
+    invoice_number = serializers.CharField(source="sale.invoice_number", read_only=True)
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = CreditNote
+        fields = ["id", "sale", "invoice_number", "reason", "amount", "items", "created_at"]
+        read_only_fields = ["created_at"]
+
+    def create(self, validated_data):
+        items = validated_data.pop("items")
+        request = self.context.get("request")
+        return create_credit_note(
+            sale=validated_data["sale"],
+            items=[{"sale_item": i["sale_item"], "quantity": i["quantity"]} for i in items],
+            user=request.user if request else None,
+            reason=validated_data.get("reason"),
+        )
+
+
 class SaleSerializer(serializers.ModelSerializer):
     items = SaleItemSerializer(many=True)
     payments = PaymentSerializer(many=True, read_only=True)
+    credit_notes = CreditNoteSerializer(many=True, read_only=True)
     customer = serializers.PrimaryKeyRelatedField(queryset=Customer.objects.all())
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     customer_type = serializers.CharField(source="customer.customer_type", read_only=True)
     salesperson = serializers.CharField(source="user.username", read_only=True)
     amount_paid = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    amount_credited = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     balance = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     payment_status = serializers.CharField(read_only=True)
 
@@ -47,8 +86,8 @@ class SaleSerializer(serializers.ModelSerializer):
         fields = [
             "id", "invoice_number", "customer", "customer_name", "customer_type",
             "salesperson", "date", "discount", "vat_rate", "subtotal", "vat_amount",
-            "total", "amount_paid", "balance", "payment_status", "notes",
-            "items", "payments", "created_at",
+            "total", "amount_paid", "amount_credited", "balance", "payment_status", "notes",
+            "items", "payments", "credit_notes", "created_at",
         ]
         read_only_fields = [
             "invoice_number", "subtotal", "vat_amount", "total", "created_at",

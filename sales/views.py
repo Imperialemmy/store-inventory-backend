@@ -10,8 +10,8 @@ from rest_framework.filters import OrderingFilter, SearchFilter
 
 from api.views import AuditLogMixin, CustomPagination
 from inventory.models import AuditLog
-from .models import Sale, SaleItem, Payment
-from .serializers import SaleSerializer, PaymentSerializer
+from .models import Sale, SaleItem, Payment, CreditNote
+from .serializers import SaleSerializer, PaymentSerializer, CreditNoteSerializer
 from .services import delete_sale, recalculate_customer_balance
 
 
@@ -129,6 +129,15 @@ class SaleViewSet(AuditLogMixin, ModelViewSet):
                 for row in by_salesperson
             ],
         })
+
+
+class CreditNoteViewSet(AuditLogMixin, ModelViewSet):
+    queryset = CreditNote.objects.select_related("sale__customer").prefetch_related("items").all()
+    serializer_class = CreditNoteSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["sale"]
+    http_method_names = ["get", "post", "head", "options"]
 
 
 class PaymentViewSet(AuditLogMixin, ModelViewSet):
