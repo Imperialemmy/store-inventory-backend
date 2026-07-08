@@ -67,12 +67,18 @@ def create_sale(*, user, customer, items, discount=Decimal("0"),
 
 @transaction.atomic
 def delete_sale(sale):
-    """Delete a sale, returning its stock and refreshing the customer balance."""
+    """Delete a sale, returning its stock and refreshing the customer balance.
+
+    Units already returned on credit notes were restocked when the return was
+    recorded, so only the un-returned remainder goes back now.
+    """
     customer = sale.customer
     for item in sale.items.select_related("product"):
-        product = Product.objects.select_for_update().get(pk=item.product_id)
-        product.stock += item.quantity
-        product.save(update_fields=["stock", "updated_at"])
+        remaining = item.quantity - credited_quantity(item)
+        if remaining > 0:
+            product = Product.objects.select_for_update().get(pk=item.product_id)
+            product.stock += remaining
+            product.save(update_fields=["stock", "updated_at"])
     sale.delete()
     recalculate_customer_balance(customer)
 

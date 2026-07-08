@@ -1,8 +1,6 @@
 from rest_framework import serializers
-from inventory.models import Product, AuditLog
+from inventory.models import Product
 from customers.models import Customer, CustomerTag
-from users.models import CustomUser
-from django.db import transaction
 
 
 class ProductSerializer(serializers.ModelSerializer):
@@ -14,13 +12,6 @@ class ProductSerializer(serializers.ModelSerializer):
         read_only_fields = ["created_at", "updated_at"]
 
 
-class CustomUserSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = CustomUser
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'phone_number', 'role']
-        read_only_fields = ['id', 'role']
-
-
 class CustomerTagSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomerTag
@@ -28,6 +19,8 @@ class CustomerTagSerializer(serializers.ModelSerializer):
 
 
 class CustomerSerializer(serializers.ModelSerializer):
+    # Tags are managed through the customer itself: read as objects, write
+    # as a list of names (created on the fly).
     tags = CustomerTagSerializer(many=True, read_only=True)
     tag_names = serializers.ListField(
         child=serializers.CharField(max_length=50), write_only=True, required=False
@@ -71,36 +64,3 @@ class CustomerSerializer(serializers.ModelSerializer):
         if tag_names is not None:
             instance.tags.set(self._resolve_tags(tag_names))
         return instance
-
-
-class AuditLogSerializer(serializers.ModelSerializer):
-    username = serializers.CharField(source="user.username", read_only=True)
-
-    class Meta:
-        model = AuditLog
-        fields = ["id", "user", "username", "action", "model_name",
-                  "object_id", "object_repr", "changes", "timestamp"]
-        read_only_fields = fields
-
-
-class PromoteUserSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = CustomUser
-        fields = ["role"]
-
-    def validate_role(self, value):
-        valid_roles = {choice[0] for choice in CustomUser.ROLE_CHOICES}
-        if value not in valid_roles:
-            raise serializers.ValidationError("Invalid role.")
-        return value
-
-    def update(self, instance, validated_data):
-        with transaction.atomic():
-            new_role = validated_data["role"]
-            if instance.role == "admin" and new_role != "admin":
-                if not CustomUser.objects.exclude(id=instance.id).filter(role="admin").exists():
-                    raise serializers.ValidationError("Cannot demote the last admin.")
-            instance.role = new_role
-            instance.is_staff = (new_role == "admin")
-            instance.save(update_fields=["role", "is_staff"])
-            return instance

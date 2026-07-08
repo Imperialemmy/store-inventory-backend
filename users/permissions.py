@@ -5,17 +5,6 @@ def _role(request):
     return getattr(request.user, "role", None)
 
 
-class IsAdminOrReadOnly(BasePermission):
-    """
-    - Allow all authenticated users to view (GET, HEAD, OPTIONS).
-    - Only admins can create, update, or delete.
-    """
-    def has_permission(self, request, view):
-        if request.method in SAFE_METHODS:
-            return request.user.is_authenticated
-        return request.user.is_authenticated and _role(request) == 'admin'
-
-
 class RoleWriteOrReadOnly(BasePermission):
     """Authenticated users can read; only the listed roles can write.
 
@@ -35,11 +24,6 @@ class RoleWriteOrReadOnly(BasePermission):
 class ManagerWriteOrReadOnly(RoleWriteOrReadOnly):
     """Admins and managers can write; everyone authenticated can read."""
     write_roles = ("manager",)
-
-
-class WarehouseWriteOrReadOnly(RoleWriteOrReadOnly):
-    """Admins, managers and warehouse staff can write (stock operations)."""
-    write_roles = ("manager", "warehouse")
 
 
 class SalesWriteOrReadOnly(RoleWriteOrReadOnly):
