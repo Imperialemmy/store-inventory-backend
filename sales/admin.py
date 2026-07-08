@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Sale, SaleItem, SaleItemAllocation, Payment
+from .models import Sale, SaleItem, Payment, CreditNote, CreditNoteItem
 
 
 class SaleItemInline(admin.TabularInline):
@@ -20,5 +20,6 @@ class SaleAdmin(admin.ModelAdmin):
     inlines = [SaleItemInline, PaymentInline]
 
 
-admin.site.register(SaleItemAllocation)
+admin.site.register(CreditNote)
+admin.site.register(CreditNoteItem)
 admin.site.register(Payment)

@@ -1,17 +1,29 @@
+from decimal import Decimal
 from django.test import TestCase
-from .models import Brand, Category, Size, Ware, WareVariant
-# Create your tests here.
+from rest_framework.test import APIClient
 
-class BrandModelTest(TestCase):
+from users.models import CustomUser
+from .models import Product
 
-    def test_brand_creation(self):
-        brand1 = Brand.objects.create(name="Nike")
-        self.assertEqual(brand1.name, "Nike")  # checks if the name is set correctly
-        self.assertEqual(str(brand1), "Nike")  # checks the __str__ method
 
-class CategoryModelTest(TestCase):
+class ProductTests(TestCase):
+    def setUp(self):
+        self.admin = CustomUser.objects.create_user(
+            username="padmin", email="p@a.com", password="x", role="admin")
+        self.client_api = APIClient()
+        self.client_api.force_authenticate(self.admin)
 
-    def test_category_creation(self):
-        category1 = Category.objects.create(name="Footwear")
-        self.assertEqual(category1.name, "Footwear")  # checks if the name is set correctly
-        self.assertEqual(str(category1), "Footwear")  # checks the __str__ method
+    def test_create_and_search_products(self):
+        self.client_api.post("/api/v1/products/", {"name": "Yam", "price": "500", "stock": 10}, format="json")
+        self.client_api.post("/api/v1/products/", {"name": "Rice", "price": "1000", "stock": 20}, format="json")
+        listed = self.client_api.get("/api/v1/products/").json()
+        self.assertEqual(len(listed), 2)
+        # default ordering is alphabetical
+        self.assertEqual(listed[0]["name"], "Rice")
+        found = self.client_api.get("/api/v1/products/?search=yam").json()
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["name"], "Yam")
+
+    def test_product_str(self):
+        product = Product.objects.create(name="Beans", price=Decimal("800"), stock=5)
+        self.assertEqual(str(product), "Beans")

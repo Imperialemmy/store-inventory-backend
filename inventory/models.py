@@ -1,190 +1,39 @@
 from django.db import models
-from django.db.models import Sum
-from users.models import CustomUser
 from django.utils.timezone import now
+from users.models import CustomUser
 
 
-class Supplier(models.Model):
-    """A supplier/vendor that stock is received from."""
+class Product(models.Model):
+    """A single sellable product: a name, an optional image, a price and a
+    running stock count. Sales draw the count down; deletions and returns
+    put it back."""
     name = models.CharField(max_length=150, unique=True)
-    contact_name = models.CharField(max_length=150, blank=True, null=True)
-    phone_number = models.CharField(max_length=20, blank=True, null=True)
-    email = models.EmailField(blank=True, null=True)
-    address = models.TextField(blank=True, null=True)
-    lead_time_days = models.PositiveIntegerField(
-        default=0,
-        help_text="Typical number of days between placing an order and receiving stock.",
-    )
-    notes = models.TextField(blank=True, null=True)
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return self.name
-
-
-class Warehouse(models.Model):
-    """A physical location/warehouse where stock is held."""
-    name = models.CharField(max_length=150, unique=True)
-    address = models.TextField(blank=True, null=True)
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return self.name
-
-
-class Brand(models.Model):
-    name = models.CharField(max_length=100, unique=True)
-
-    def __str__(self):
-        return self.name
-
-class Category(models.Model):
-    name = models.CharField(max_length=100, unique=True)
-
-    def __str__(self):
-        return self.name
-
-class Size(models.Model):
-    size = models.CharField(max_length=10)
-    size_unit = models.CharField(max_length=20, blank=True, null=True)
-
-    def __str__(self):
-        return f'{self.size} {self.size_unit if self.size_unit else ""}'.strip()
-
-class Ware(models.Model):
-    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE)
-    name = models.CharField(max_length=100)
-    brand = models.ForeignKey(Brand, related_name='wares', on_delete=models.CASCADE)
-    category = models.ForeignKey(Category, related_name='wares', on_delete=models.CASCADE)
-    description = models.TextField(null=True, blank=True)
-    size = models.ManyToManyField(Size, related_name='wares', blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        unique_together = ('user', 'name', 'brand')
-
-    def __str__(self):
-        return f"{self.name}"
-
-
-class WareVariant(models.Model):
-    ware = models.ForeignKey('Ware', related_name='variants', on_delete=models.CASCADE)
-    size = models.ForeignKey('Size', on_delete=models.CASCADE)
-    price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
-    retail_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
-    wholesale_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
-    reorder_point = models.PositiveIntegerField(
-        default=0,
-        help_text="Stock level at or below which the variant is flagged for reordering.",
-    )
-    is_available = models.BooleanField(default=True)
-
-    def save(self, *args, **kwargs):
-        # Keep the legacy single `price` aligned with the retail price so
-        # older reads stay correct now that pricing is dual (wholesale/retail).
-        if self.retail_price:
-            self.price = self.retail_price
-        elif self.price and not self.retail_price:
-            self.retail_price = self.price
-        super().save(*args, **kwargs)
-
-    def price_for(self, customer_type):
-        """Return the wholesale or retail price for a given customer type,
-        falling back to the other price (or legacy price) when unset."""
-        if customer_type == "wholesale" and self.wholesale_price:
-            return self.wholesale_price
-        return self.retail_price or self.price
-
-    class Meta:
-        unique_together = ('ware', 'size')
-
-    def __str__(self):
-        return f"{self.ware.name} - {self.size}"
-
-    def update_availability(self):
-        """ Update the availability based on stock count. """
-        self.is_available = self.get_stock() > 0
-        self.save(update_fields=["is_available"])
-
-    def get_stock(self, warehouse=None):
-        """ Efficiently calculate total stock for this variant.
-
-        Pass a ``warehouse`` (instance or id) to scope the count to a single
-        location; otherwise stock is summed across all warehouses.
-        """
-        batches = self.batches.all()
-        if warehouse is not None:
-            batches = batches.filter(warehouse=warehouse)
-        return batches.aggregate(total=Sum('quantity'))['total'] or 0
-
-    def stock_by_warehouse(self):
-        """ Return a list of {warehouse, stock} totals per location. """
-        return list(
-            self.batches.values('warehouse', 'warehouse__name')
-            .annotate(stock=Sum('quantity'))
-            .order_by('warehouse__name')
-        )
-
-    @property
-    def is_low_stock(self):
-        """ True when total stock has fallen to or below the reorder point. """
-        return self.get_stock() <= self.reorder_point
-
-
-
-class Batch(models.Model):
-    variant = models.ForeignKey(WareVariant, related_name='batches', on_delete=models.CASCADE)
-    warehouse = models.ForeignKey(
-        Warehouse, related_name='batches', on_delete=models.PROTECT,
-        null=True, blank=True,
-    )
-    supplier = models.ForeignKey(
-        Supplier, related_name='batches', on_delete=models.SET_NULL,
-        null=True, blank=True,
-    )
-    quantity = models.PositiveIntegerField(default=0)
-    expiry_date = models.DateField()
-    manufacturing_date = models.DateField(null=True, blank=True)
-    lot_number = models.CharField(max_length=50, blank=True, null=True)
-    is_expired = models.BooleanField(default=False)
+    image = models.ImageField(upload_to="products/", blank=True, null=True)
+    price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    stock = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(default=now)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        ordering = ["name"]
+
     def __str__(self):
-        return f"Batch {self.lot_number or 'N/A'} - {self.variant}"
-
-    def save(self, *args, **kwargs):
-        """ Update expiration status and variant availability when saving a batch. """
-        self.is_expired = self.expiry_date < now().date()
-        super().save(*args, **kwargs)
-        self.variant.update_availability()  # Update WareVariant availability
-
-
-class Image(models.Model):
-    ware = models.ForeignKey(Ware, related_name='ware_images', on_delete=models.CASCADE)
-    image = models.ImageField(upload_to='ware_images/')
-    alt_text = models.CharField(max_length=255, blank=True, null=True)
-    order = models.PositiveIntegerField(default=0)
+        return self.name
 
 
 class AuditLog(models.Model):
-    """Append-only record of who changed what and when, across modules."""
-    CREATE = 'create'
-    UPDATE = 'update'
-    DELETE = 'delete'
+    """Append-only record of who changed what and when."""
+    CREATE = "create"
+    UPDATE = "update"
+    DELETE = "delete"
     ACTION_CHOICES = (
-        (CREATE, 'Create'),
-        (UPDATE, 'Update'),
-        (DELETE, 'Delete'),
+        (CREATE, "Create"),
+        (UPDATE, "Update"),
+        (DELETE, "Delete"),
     )
 
     user = models.ForeignKey(
-        CustomUser, related_name='audit_logs', on_delete=models.SET_NULL,
+        CustomUser, related_name="audit_logs", on_delete=models.SET_NULL,
         null=True, blank=True,
     )
     action = models.CharField(max_length=10, choices=ACTION_CHOICES)
@@ -195,13 +44,7 @@ class AuditLog(models.Model):
     timestamp = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ['-timestamp']
+        ordering = ["-timestamp"]
 
     def __str__(self):
         return f"{self.timestamp:%Y-%m-%d %H:%M} {self.action} {self.model_name}#{self.object_id}"
-
-
-
-
-
-
