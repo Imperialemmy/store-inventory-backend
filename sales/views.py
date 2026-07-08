@@ -1,7 +1,6 @@
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.permissions import IsAuthenticated, BasePermission
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework.filters import OrderingFilter, SearchFilter
 
 from api.views import AuditLogMixin, CustomPagination
 from inventory.models import AuditLog
@@ -21,17 +20,15 @@ class SalesAccess(BasePermission):
 
 
 class SaleViewSet(AuditLogMixin, ModelViewSet):
+    """Sales: list (paginated, ?customer=<id> filter), detail, create, delete."""
     queryset = Sale.objects.select_related("customer", "user").prefetch_related(
         "items__product", "payments", "credit_notes__items"
     ).all()
     serializer_class = SaleSerializer
     permission_classes = [SalesAccess]
     pagination_class = CustomPagination
-    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ["customer", "customer__customer_type", "date"]
-    search_fields = ["invoice_number", "customer__name"]
-    ordering_fields = ["created_at", "date", "total"]
-    ordering = ["-created_at"]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["customer"]
     http_method_names = ["get", "post", "delete", "head", "options"]
 
     def perform_destroy(self, instance):
@@ -39,28 +36,21 @@ class SaleViewSet(AuditLogMixin, ModelViewSet):
         delete_sale(instance)
 
 
-class CreditNoteViewSet(AuditLogMixin, ModelViewSet):
-    queryset = CreditNote.objects.select_related("sale__customer").prefetch_related("items").all()
-    serializer_class = CreditNoteSerializer
-    permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ["sale"]
-    http_method_names = ["get", "post", "head", "options"]
-
-
 class PaymentViewSet(AuditLogMixin, ModelViewSet):
+    """Record payments against a sale. History is read through the sale."""
     queryset = Payment.objects.select_related("sale", "sale__customer").all()
     serializer_class = PaymentSerializer
     permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ["sale", "method"]
-    http_method_names = ["get", "post", "delete", "head", "options"]
+    http_method_names = ["post", "head", "options"]
 
     def perform_create(self, serializer):
         super().perform_create(serializer)
         recalculate_customer_balance(serializer.instance.sale.customer)
 
-    def perform_destroy(self, instance):
-        customer = instance.sale.customer
-        super().perform_destroy(instance)
-        recalculate_customer_balance(customer)
+
+class CreditNoteViewSet(AuditLogMixin, ModelViewSet):
+    """Record returns against a sale. History is read through the sale."""
+    queryset = CreditNote.objects.select_related("sale__customer").prefetch_related("items").all()
+    serializer_class = CreditNoteSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["post", "head", "options"]

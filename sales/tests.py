@@ -84,6 +84,18 @@ class SalesFlowTests(TestCase):
         self.assertEqual(Decimal(detail["amount_credited"]), Decimal("4300.00"))
         self.assertEqual(detail["items"][0]["returned_quantity"], 4)
 
+    def test_delete_sale_with_returns_does_not_double_restock(self):
+        sale = self.create_sale(10).json()  # stock 25 -> 15
+        item_id = sale["items"][0]["id"]
+        self.client_api.post("/api/v1/credit-notes/", {
+            "sale": sale["id"], "items": [{"sale_item": item_id, "quantity": 4}],
+        }, format="json")  # stock 15 -> 19
+        res = self.client_api.delete(f"/api/v1/sales/{sale['id']}/")
+        self.assertEqual(res.status_code, 204)
+        self.product.refresh_from_db()
+        # Only the 6 un-returned units come back: 19 + 6 = 25, not 29.
+        self.assertEqual(self.product.stock, 25)
+
     def test_credit_note_over_return_blocked(self):
         sale = self.create_sale(10).json()
         item_id = sale["items"][0]["id"]

@@ -1,27 +1,21 @@
-from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
+from rest_framework.viewsets import ModelViewSet
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.decorators import action
-from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework.filters import OrderingFilter, SearchFilter
 
-from users.models import CustomUser
-from users.permissions import (
-    IsAdminOrReadOnly, ManagerWriteOrReadOnly, SalesWriteOrReadOnly,
-)
+from users.permissions import ManagerWriteOrReadOnly, SalesWriteOrReadOnly
 from inventory.models import Product, AuditLog
-from customers.models import Customer, CustomerTag
-from .serializers import (
-    ProductSerializer, CustomUserSerializer, PromoteUserSerializer,
-    CustomerSerializer, CustomerTagSerializer, AuditLogSerializer,
-)
+from customers.models import Customer
+from .serializers import ProductSerializer, CustomerSerializer
 
 
 class AuditLogMixin:
-    """Write an AuditLog row whenever a viewset creates, updates or deletes."""
+    """Write an AuditLog row whenever a viewset creates, updates or deletes.
+
+    The trail is internal (readable in the Django admin); there is no API
+    endpoint for it.
+    """
 
     def _log(self, action, instance):
         try:
@@ -48,20 +42,10 @@ class AuditLogMixin:
         instance.delete()
 
 
-class BulkDeleteMixin:
-    @action(detail=False, methods=["post"], url_path="bulk-delete", permission_classes=[IsAdminOrReadOnly])
-    def bulk_delete(self, request):
-        ids = request.data.get("ids", [])
-        if not ids:
-            return Response({"detail": "No IDs provided."}, status=status.HTTP_400_BAD_REQUEST)
-        self.queryset.model.objects.filter(id__in=ids).delete()
-        return Response({"detail": "Deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
-
-
 class CustomPagination(PageNumberPagination):
     page_size = 10
     page_size_query_param = 'page_size'
-    max_page_size = 100
+    max_page_size = 1000
 
     def get_paginated_response(self, data):
         return Response({
@@ -72,64 +56,20 @@ class CustomPagination(PageNumberPagination):
         })
 
 
-class ProductViewSet(AuditLogMixin, ModelViewSet, BulkDeleteMixin):
+class ProductViewSet(AuditLogMixin, ModelViewSet):
+    """Products: full CRUD. Returned unpaginated, A–Z (model ordering);
+    the frontend filters client-side."""
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
     permission_classes = [ManagerWriteOrReadOnly]
-    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    search_fields = ["name"]
-    ordering_fields = ["name", "price", "stock"]
-    ordering = ["name"]
 
 
-class CustomerViewSet(AuditLogMixin, ModelViewSet, BulkDeleteMixin):
+class CustomerViewSet(AuditLogMixin, ModelViewSet):
+    """Customers: full CRUD, paginated (?page_size=N)."""
     queryset = Customer.objects.prefetch_related("tags").all()
     serializer_class = CustomerSerializer
     permission_classes = [SalesWriteOrReadOnly]
     pagination_class = CustomPagination
-    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ["customer_type", "city", "is_active", "tags"]
-    search_fields = ["name", "phone_number", "email", "city"]
-    ordering_fields = ["name", "outstanding_balance", "credit_limit", "created_at"]
-    ordering = ["name"]
-
-    def get_queryset(self):
-        qs = Customer.objects.prefetch_related("tags").all()
-        has_balance = self.request.query_params.get("has_balance")
-        if has_balance in ("true", "1"):
-            qs = qs.filter(outstanding_balance__gt=0)
-        return qs
-
-
-class CustomerTagViewSet(AuditLogMixin, ModelViewSet, BulkDeleteMixin):
-    queryset = CustomerTag.objects.all()
-    serializer_class = CustomerTagSerializer
-    permission_classes = [SalesWriteOrReadOnly]
-    filter_backends = [DjangoFilterBackend, SearchFilter]
-    search_fields = ["name"]
-
-
-class UserViewSet(ModelViewSet):
-    queryset = CustomUser.objects.all()
-    serializer_class = CustomUserSerializer
-    permission_classes = [IsAdminOrReadOnly]
-
-    @action(detail=True, methods=["post"], permission_classes=[IsAdminOrReadOnly])
-    def set_role(self, request, pk=None):
-        user = self.get_object()
-        ser = PromoteUserSerializer(user, data=request.data, partial=True)
-        ser.is_valid(raise_exception=True)
-        ser.save()
-        return Response({"detail": "Role updated", "user": CustomUserSerializer(user).data})
-
-
-class AuditLogViewSet(ReadOnlyModelViewSet):
-    queryset = AuditLog.objects.select_related('user').all()
-    serializer_class = AuditLogSerializer
-    permission_classes = [IsAdminOrReadOnly]
-    filter_backends = [DjangoFilterBackend, SearchFilter]
-    filterset_fields = ['action', 'model_name', 'user']
-    search_fields = ['object_repr', 'object_id']
 
 
 class NotificationsView(APIView):

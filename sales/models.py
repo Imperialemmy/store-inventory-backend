@@ -115,7 +115,9 @@ class CreditNote(models.Model):
 
 class CreditNoteItem(models.Model):
     credit_note = models.ForeignKey(CreditNote, related_name="items", on_delete=models.CASCADE)
-    sale_item = models.ForeignKey(SaleItem, related_name="credited_items", on_delete=models.PROTECT)
+    # Cascades with its sale line: a credit note only exists in the context
+    # of its sale, and sale deletion handles the stock restoration itself.
+    sale_item = models.ForeignKey(SaleItem, related_name="credited_items", on_delete=models.CASCADE)
     quantity = models.PositiveIntegerField()
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
 
