@@ -1,5 +1,6 @@
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.views import APIView
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
@@ -66,10 +67,24 @@ class ProductViewSet(AuditLogMixin, ModelViewSet):
 
 class CustomerViewSet(AuditLogMixin, ModelViewSet):
     """Customers: full CRUD, paginated (?page_size=N)."""
+    WALK_IN_NAME = "Walk-in Customer"
+
     queryset = Customer.objects.prefetch_related("tags").all()
     serializer_class = CustomerSerializer
     permission_classes = [SellerWriteOrReadOnly]
     pagination_class = CustomPagination
+
+    @action(detail=False, methods=["get"], url_path="walk-in")
+    def walk_in(self, request):
+        """Return the shared 'Walk-in Customer', creating it once on first use.
+
+        Lets the POS ring up a casual sale without capturing any details —
+        every anonymous sale is grouped under this single record.
+        """
+        customer = Customer.objects.filter(name=self.WALK_IN_NAME).first()
+        if customer is None:
+            customer = Customer.objects.create(name=self.WALK_IN_NAME, user=request.user)
+        return Response(self.get_serializer(customer).data)
 
 
 class NotificationsView(APIView):
