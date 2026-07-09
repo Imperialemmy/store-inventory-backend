@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
 
-from users.permissions import ManagerWriteOrReadOnly, SalesWriteOrReadOnly
+from users.permissions import AdminWriteOrReadOnly, SellerWriteOrReadOnly
 from inventory.models import Product, AuditLog
 from customers.models import Customer
 from .serializers import ProductSerializer, CustomerSerializer
@@ -61,14 +61,14 @@ class ProductViewSet(AuditLogMixin, ModelViewSet):
     the frontend filters client-side."""
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
-    permission_classes = [ManagerWriteOrReadOnly]
+    permission_classes = [AdminWriteOrReadOnly]
 
 
 class CustomerViewSet(AuditLogMixin, ModelViewSet):
     """Customers: full CRUD, paginated (?page_size=N)."""
     queryset = Customer.objects.prefetch_related("tags").all()
     serializer_class = CustomerSerializer
-    permission_classes = [SalesWriteOrReadOnly]
+    permission_classes = [SellerWriteOrReadOnly]
     pagination_class = CustomPagination
 
 

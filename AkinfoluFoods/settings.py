@@ -169,6 +169,10 @@ DJOSER = {
     }
 }
 
+# Secret code required to register an Admin account (empty = admin signup
+# disabled except for the very first bootstrap user).
+ADMIN_SIGNUP_CODE = config('ADMIN_SIGNUP_CODE', default='')
+
 SIMPLE_JWT = {
    'AUTH_HEADER_TYPES': ('JWT',),
    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),

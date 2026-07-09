@@ -112,29 +112,29 @@ class RolePermissionTests(TestCase):
     def setUp(self):
         self.admin = CustomUser.objects.create_user(
             username="admin2", email="a2@a.com", password="x", role="admin")
-        self.sales_user = CustomUser.objects.create_user(
-            username="sales2", email="s2@a.com", password="x", role="sales")
-        self.plain = CustomUser.objects.create_user(
-            username="plain", email="p@a.com", password="x", role="user")
+        self.seller = CustomUser.objects.create_user(
+            username="seller2", email="s2@a.com", password="x", role="seller")
 
     def _client(self, user):
         client = APIClient()
         client.force_authenticate(user)
         return client
 
-    def test_sales_role_can_create_customers_not_products(self):
-        client = self._client(self.sales_user)
+    def test_seller_can_create_customers_and_sales_not_products(self):
+        client = self._client(self.seller)
         self.assertEqual(client.post("/api/v1/customers/", {
             "name": "C1", "customer_type": "retail"}, format="json").status_code, 201)
+        # seller cannot create products (admin-only)
         self.assertEqual(client.post("/api/v1/products/", {
             "name": "P1", "price": "100", "stock": 5}, format="json").status_code, 403)
-
-    def test_plain_user_cannot_create_products(self):
-        client = self._client(self.plain)
-        self.assertEqual(client.post("/api/v1/products/", {
-            "name": "P2", "price": "100", "stock": 5}, format="json").status_code, 403)
+        # but can read them
+        self.assertEqual(client.get("/api/v1/products/").status_code, 200)
 
     def test_admin_can_create_products(self):
         client = self._client(self.admin)
         self.assertEqual(client.post("/api/v1/products/", {
             "name": "P3", "price": "100", "stock": 5}, format="json").status_code, 201)
+
+    def test_only_admin_can_list_users(self):
+        self.assertEqual(self._client(self.seller).get("/api/v1/users/").status_code, 403)
+        self.assertEqual(self._client(self.admin).get("/api/v1/users/").status_code, 200)

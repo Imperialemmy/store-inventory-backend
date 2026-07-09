@@ -5,27 +5,22 @@ def _role(request):
     return getattr(request.user, "role", None)
 
 
-class RoleWriteOrReadOnly(BasePermission):
-    """Authenticated users can read; only the listed roles can write.
-
-    Subclass with `write_roles = (...)`. Admin is always allowed to write.
-    """
-    write_roles: tuple = ()
-
+class AdminWriteOrReadOnly(BasePermission):
+    """Authenticated users can read; only admins can write (e.g. products)."""
     def has_permission(self, request, view):
         if not request.user.is_authenticated:
             return False
         if request.method in SAFE_METHODS:
             return True
-        role = _role(request)
-        return role == "admin" or role in self.write_roles
+        return _role(request) == "admin"
 
 
-class ManagerWriteOrReadOnly(RoleWriteOrReadOnly):
-    """Admins and managers can write; everyone authenticated can read."""
-    write_roles = ("manager",)
-
-
-class SalesWriteOrReadOnly(RoleWriteOrReadOnly):
-    """Admins, managers and sales staff can write (customers, sales)."""
-    write_roles = ("manager", "sales")
+class SellerWriteOrReadOnly(BasePermission):
+    """Authenticated users can read; admins and sellers can write
+    (customers, sales)."""
+    def has_permission(self, request, view):
+        if not request.user.is_authenticated:
+            return False
+        if request.method in SAFE_METHODS:
+            return True
+        return _role(request) in ("admin", "seller")
