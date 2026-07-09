@@ -6,7 +6,7 @@ from api.views import AuditLogMixin, CustomPagination
 from inventory.models import AuditLog
 from .models import Sale, Payment, CreditNote
 from .serializers import SaleSerializer, PaymentSerializer, CreditNoteSerializer
-from .services import delete_sale, recalculate_customer_balance
+from .services import delete_sale
 
 
 class SalesAccess(BasePermission):
@@ -45,7 +45,6 @@ class PaymentViewSet(AuditLogMixin, ModelViewSet):
 
     def perform_create(self, serializer):
         super().perform_create(serializer)
-        recalculate_customer_balance(serializer.instance.sale.customer)
 
 
 class CreditNoteViewSet(AuditLogMixin, ModelViewSet):

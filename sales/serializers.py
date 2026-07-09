@@ -70,7 +70,6 @@ class SaleSerializer(serializers.ModelSerializer):
     credit_notes = CreditNoteSerializer(many=True, read_only=True)
     customer = serializers.PrimaryKeyRelatedField(queryset=Customer.objects.all())
     customer_name = serializers.CharField(source="customer.name", read_only=True)
-    customer_type = serializers.CharField(source="customer.customer_type", read_only=True)
     salesperson = serializers.CharField(source="user.username", read_only=True)
     amount_paid = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     amount_credited = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
@@ -80,7 +79,7 @@ class SaleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Sale
         fields = [
-            "id", "invoice_number", "customer", "customer_name", "customer_type",
+            "id", "invoice_number", "customer", "customer_name",
             "salesperson", "date", "discount", "vat_rate", "subtotal", "vat_amount",
             "total", "amount_paid", "amount_credited", "balance", "payment_status", "notes",
             "items", "payments", "credit_notes", "created_at",

@@ -38,15 +38,13 @@ class CustomerSerializer(serializers.ModelSerializer):
     tag_names = serializers.ListField(
         child=serializers.CharField(max_length=50), write_only=True, required=False
     )
-    available_credit = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
-    customer_type_display = serializers.CharField(source="get_customer_type_display", read_only=True)
 
     class Meta:
         model = Customer
         fields = [
-            "id", "name", "customer_type", "customer_type_display", "phone_number",
-            "email", "address", "city", "credit_limit", "outstanding_balance",
-            "available_credit", "tags", "tag_names", "notes", "is_active",
+            "id", "name", "phone_number",
+            "email", "address", "city",
+            "tags", "tag_names", "notes", "is_active",
             "created_at", "updated_at",
         ]
         read_only_fields = ["created_at", "updated_at"]

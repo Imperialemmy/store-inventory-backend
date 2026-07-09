@@ -6,15 +6,6 @@ from inventory.models import Product
 from .models import Sale, SaleItem, CreditNote, CreditNoteItem
 
 
-def recalculate_customer_balance(customer):
-    """Set a customer's outstanding balance to the sum of unpaid amounts."""
-    total = Decimal("0")
-    for sale in customer.sales.all():
-        total += sale.balance
-    customer.outstanding_balance = total
-    customer.save(update_fields=["outstanding_balance", "updated_at"])
-
-
 def credited_quantity(sale_item):
     """Units of this line already returned on previous credit notes."""
     return sale_item.credited_items.aggregate(t=Sum("quantity"))["t"] or 0
@@ -61,7 +52,6 @@ def create_sale(*, user, customer, items, discount=Decimal("0"),
         product.save(update_fields=["stock", "updated_at"])
 
     sale.recalculate()
-    recalculate_customer_balance(customer)
     return sale
 
 
@@ -72,7 +62,6 @@ def delete_sale(sale):
     Units already returned on credit notes were restocked when the return was
     recorded, so only the un-returned remainder goes back now.
     """
-    customer = sale.customer
     for item in sale.items.select_related("product"):
         remaining = item.quantity - credited_quantity(item)
         if remaining > 0:
@@ -80,7 +69,6 @@ def delete_sale(sale):
             product.stock += remaining
             product.save(update_fields=["stock", "updated_at"])
     sale.delete()
-    recalculate_customer_balance(customer)
 
 
 @transaction.atomic
@@ -110,5 +98,4 @@ def create_credit_note(*, sale, items, user=None, reason=None):
         product.stock += quantity
         product.save(update_fields=["stock", "updated_at"])
 
-    recalculate_customer_balance(sale.customer)
     return note
