@@ -2,7 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import ProductViewSet, CustomerViewSet, NotificationsView
 from sales.views import SaleViewSet, PaymentViewSet, CreditNoteViewSet
-from users.views import UserAdminViewSet
+from users.views import UserAdminViewSet, AccountStatusView
 
 router = DefaultRouter()
 router.register(r'products', ProductViewSet)
@@ -14,5 +14,6 @@ router.register(r'users', UserAdminViewSet)
 
 urlpatterns = [
     path('notifications/', NotificationsView.as_view(), name='notifications'),
+    path('auth/account-status/', AccountStatusView.as_view(), name='account-status'),
     path('', include(router.urls)),
 ]

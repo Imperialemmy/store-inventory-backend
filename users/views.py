@@ -1,8 +1,9 @@
 from rest_framework.viewsets import ReadOnlyModelViewSet
+from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import BasePermission
+from rest_framework.permissions import BasePermission, AllowAny
 
 from .models import CustomUser
 from .serializers import UserAdminSerializer
@@ -11,6 +12,19 @@ from .serializers import UserAdminSerializer
 class IsAdmin(BasePermission):
     def has_permission(self, request, view):
         return request.user.is_authenticated and getattr(request.user, "role", None) == "admin"
+
+
+class AccountStatusView(APIView):
+    """Public: after a failed login, lets the UI tell a pending seller apart
+    from a wrong password. Only reports the pending/awaiting-approval state;
+    it never validates a password."""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        username = str(request.data.get("username", "")).strip()
+        user = CustomUser.objects.filter(username__iexact=username).first()
+        pending = bool(user and not user.is_active and user.role == CustomUser.SELLER)
+        return Response({"pending": pending})
 
 
 class UserAdminViewSet(ReadOnlyModelViewSet):
