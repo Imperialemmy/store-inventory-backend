@@ -32,6 +32,13 @@ class ProductTests(TestCase):
             self.client_api.delete(f"/api/v1/products/{created['id']}/").status_code, 204)
         self.assertEqual(Product.objects.count(), 0)
 
+    def test_duplicate_name_blocked_case_insensitively(self):
+        self.client_api.post("/api/v1/products/", {"name": "Rice", "price": "1000", "stock": 5}, format="json")
+        res = self.client_api.post("/api/v1/products/", {"name": "  rice ", "price": "900", "stock": 3}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("already exists", str(res.json()).lower())
+        self.assertEqual(Product.objects.count(), 1)
+
     def test_product_str(self):
         product = Product.objects.create(name="Beans", price=Decimal("800"), stock=5)
         self.assertEqual(str(product), "Beans")

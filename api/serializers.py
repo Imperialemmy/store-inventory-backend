@@ -11,6 +11,19 @@ class ProductSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "image", "price", "stock", "created_at", "updated_at"]
         read_only_fields = ["created_at", "updated_at"]
 
+    def validate_name(self, value):
+        # Trim and treat names case-insensitively so "Rice", "rice " and
+        # "RICE" can't become three separate products.
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Name is required.")
+        clashes = Product.objects.filter(name__iexact=value)
+        if self.instance:
+            clashes = clashes.exclude(pk=self.instance.pk)
+        if clashes.exists():
+            raise serializers.ValidationError("A product with this name already exists.")
+        return value
+
 
 class CustomerTagSerializer(serializers.ModelSerializer):
     class Meta:
