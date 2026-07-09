@@ -133,3 +133,13 @@ class RolePermissionTests(TestCase):
     def test_only_admin_can_list_users(self):
         self.assertEqual(self._client(self.seller).get("/api/v1/users/").status_code, 403)
         self.assertEqual(self._client(self.admin).get("/api/v1/users/").status_code, 200)
+
+    def test_walk_in_customer_is_reused_not_duplicated(self):
+        client = self._client(self.seller)
+        first = client.get("/api/v1/customers/walk-in/")
+        second = client.get("/api/v1/customers/walk-in/")
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.json()["name"], "Walk-in Customer")
+        # Same record returned every time — no duplicate walk-in customers.
+        self.assertEqual(first.json()["id"], second.json()["id"])
+        self.assertEqual(Customer.objects.filter(name="Walk-in Customer").count(), 1)
