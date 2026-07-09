@@ -4,8 +4,8 @@ from .models import Customer, CustomerTag
 
 @admin.register(Customer)
 class CustomerAdmin(admin.ModelAdmin):
-    list_display = ("name", "customer_type", "phone_number", "city", "outstanding_balance", "credit_limit", "is_active")
-    list_filter = ("customer_type", "is_active", "city")
+    list_display = ("name", "phone_number", "city", "is_active")
+    list_filter = ("is_active", "city")
     search_fields = ("name", "phone_number", "email")
     filter_horizontal = ("tags",)
 

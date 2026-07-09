@@ -12,25 +12,12 @@ class CustomerTag(models.Model):
 
 
 class Customer(models.Model):
-    WHOLESALE = "wholesale"
-    RETAIL = "retail"
-    TYPE_CHOICES = (
-        (WHOLESALE, "Wholesale"),
-        (RETAIL, "Retail"),
-    )
-
     user = models.ForeignKey(CustomUser, related_name="customers", on_delete=models.CASCADE)
     name = models.CharField(max_length=150)
-    customer_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=RETAIL)
     phone_number = models.CharField(max_length=20, blank=True, null=True)
     email = models.EmailField(blank=True, null=True)
     address = models.TextField(blank=True, null=True)
     city = models.CharField(max_length=100, blank=True, null=True)
-
-    credit_limit = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    # Current amount owed by the customer. Maintained manually for now;
-    # the Sales & Invoicing module will derive this from unpaid invoices.
-    outstanding_balance = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     tags = models.ManyToManyField(CustomerTag, related_name="customers", blank=True)
     notes = models.TextField(blank=True, null=True)
@@ -45,8 +32,3 @@ class Customer(models.Model):
 
     def __str__(self):
         return self.name
-
-    @property
-    def available_credit(self):
-        """How much more the customer may owe before hitting their limit."""
-        return self.credit_limit - self.outstanding_balance

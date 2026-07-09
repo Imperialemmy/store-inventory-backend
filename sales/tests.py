@@ -17,8 +17,7 @@ class SalesFlowTests(TestCase):
         self.client_api = APIClient()
         self.client_api.force_authenticate(self.admin)
         self.product = Product.objects.create(name="Rice 50kg", price=Decimal("1000"), stock=25)
-        self.customer = Customer.objects.create(
-            user=self.admin, name="Buyer", customer_type="retail", credit_limit=Decimal("1000000"))
+        self.customer = Customer.objects.create(user=self.admin, name="Buyer")
 
     def create_sale(self, quantity=8):
         return self.client_api.post("/api/v1/sales/", {
@@ -48,7 +47,7 @@ class SalesFlowTests(TestCase):
         self.assertEqual(self.product.stock, 25)
         self.assertEqual(Sale.objects.count(), 0)
 
-    def test_payment_updates_balance_and_customer(self):
+    def test_payment_updates_sale_balance(self):
         sale = self.create_sale(8).json()
         self.client_api.post("/api/v1/payments/", {
             "sale": sale["id"], "amount": "5000", "method": "transfer",
@@ -56,17 +55,13 @@ class SalesFlowTests(TestCase):
         detail = self.client_api.get(f"/api/v1/sales/{sale['id']}/").json()
         self.assertEqual(Decimal(detail["balance"]), Decimal("3600.00"))
         self.assertEqual(detail["payment_status"], "partial")
-        self.customer.refresh_from_db()
-        self.assertEqual(self.customer.outstanding_balance, Decimal("3600.00"))
 
-    def test_delete_sale_restores_stock_and_balance(self):
+    def test_delete_sale_restores_stock(self):
         sale = self.create_sale(8).json()
         res = self.client_api.delete(f"/api/v1/sales/{sale['id']}/")
         self.assertEqual(res.status_code, 204)
         self.product.refresh_from_db()
         self.assertEqual(self.product.stock, 25)
-        self.customer.refresh_from_db()
-        self.assertEqual(self.customer.outstanding_balance, Decimal("0.00"))
 
     def test_credit_note_restocks_and_credits(self):
         sale = self.create_sale(10).json()
@@ -123,7 +118,7 @@ class RolePermissionTests(TestCase):
     def test_seller_can_create_customers_and_sales_not_products(self):
         client = self._client(self.seller)
         self.assertEqual(client.post("/api/v1/customers/", {
-            "name": "C1", "customer_type": "retail"}, format="json").status_code, 201)
+            "name": "C1"}, format="json").status_code, 201)
         # seller cannot create products (admin-only)
         self.assertEqual(client.post("/api/v1/products/", {
             "name": "P1", "price": "100", "stock": 5}, format="json").status_code, 403)
