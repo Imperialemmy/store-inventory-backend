@@ -1,6 +1,7 @@
 from decimal import Decimal
 from django.db import models
 from django.utils.timezone import now, localdate
+import uuid
 from users.models import CustomUser
 from customers.models import Customer
 from inventory.models import Product
@@ -16,8 +17,17 @@ class Sale(models.Model):
         CustomUser, related_name="sales", on_delete=models.SET_NULL, null=True
     )
     customer = models.ForeignKey(Customer, related_name="sales", on_delete=models.PROTECT)
+    client_sale_id = models.UUIDField(
+        unique=True, default=uuid.uuid4, editable=False, db_index=True
+    )
     invoice_number = models.CharField(max_length=30, unique=True, blank=True)
     date = models.DateField(default=localdate)
+    sold_at = models.DateTimeField(default=now)
+    synced_at = models.DateTimeField(default=now)
+    device_id = models.CharField(max_length=100, blank=True, null=True)
+    offline_created = models.BooleanField(default=False)
+    inventory_attention = models.BooleanField(default=False)
+    pricing_attention = models.BooleanField(default=False)
 
     discount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     vat_rate = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("7.5"))
@@ -54,6 +64,8 @@ class Sale(models.Model):
 
     @property
     def amount_paid(self):
+        if "payments" in getattr(self, "_prefetched_objects_cache", {}):
+            return sum((payment.amount for payment in self.payments.all()), Decimal("0"))
         return self.payments.aggregate(total=models.Sum("amount"))["total"] or Decimal("0")
 
     @property

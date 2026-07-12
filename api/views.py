@@ -1,14 +1,21 @@
 from rest_framework.viewsets import ModelViewSet
+from django.db import models, transaction
 from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.pagination import PageNumberPagination
 
 from users.permissions import AdminWriteOrReadOnly, SellerWriteOrReadOnly
-from inventory.models import Product, AuditLog
+from inventory.models import Product, AuditLog, InventoryMovement
+from inventory.services import adjust_inventory
 from customers.models import Customer
-from .serializers import ProductSerializer, CustomerSerializer
+from .serializers import (
+    ProductSerializer, CustomerSerializer, InventoryMovementSerializer,
+)
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class AuditLogMixin:
@@ -18,7 +25,14 @@ class AuditLogMixin:
     endpoint for it.
     """
 
-    def _log(self, action, instance):
+    def _snapshot(self, instance):
+        result = {}
+        for field in instance._meta.concrete_fields:
+            value = getattr(instance, field.attname, None)
+            result[field.name] = str(value) if value is not None else None
+        return result
+
+    def _log(self, action, instance, changes=None):
         try:
             AuditLog.objects.create(
                 user=self.request.user if self.request.user.is_authenticated else None,
@@ -26,21 +40,72 @@ class AuditLogMixin:
                 model_name=instance.__class__.__name__,
                 object_id=str(getattr(instance, "pk", "")),
                 object_repr=str(instance)[:255],
+                changes=changes,
             )
         except Exception:
-            pass
+            logger.exception("Audit log write failed for %s %s", action, instance)
 
     def perform_create(self, serializer):
         instance = serializer.save()
-        self._log(AuditLog.CREATE, instance)
+        self._log(AuditLog.CREATE, instance, {"after": self._snapshot(instance)})
 
     def perform_update(self, serializer):
+        before = self._snapshot(serializer.instance)
         instance = serializer.save()
-        self._log(AuditLog.UPDATE, instance)
+        self._log(AuditLog.UPDATE, instance, {
+            "before": before,
+            "after": self._snapshot(instance),
+        })
 
     def perform_destroy(self, instance):
-        self._log(AuditLog.DELETE, instance)
+        self._log(AuditLog.DELETE, instance, {"before": self._snapshot(instance)})
         instance.delete()
+
+
+class HealthView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        from django.conf import settings
+        return Response({
+            "status": "ok",
+            "default_vat_rate": str(settings.DEFAULT_VAT_RATE),
+        })
+
+
+class OperationsSummaryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.db.models import Sum
+        from django.utils.timezone import localdate
+        from sales.models import Sale, Payment
+
+        today = localdate()
+        sales = Sale.objects.filter(date=today)
+        payments = Payment.objects.filter(date=today)
+        payment_totals = {
+            method: str(
+                payments.filter(method=method).aggregate(total=Sum("amount"))["total"] or 0
+            )
+            for method in (Payment.CASH, Payment.TRANSFER, Payment.POS)
+        }
+        low_stock = Product.objects.filter(stock__lte=models.F("reorder_level")).count()
+        attention = Sale.objects.filter(inventory_attention=True).count()
+        outstanding_sales = Sale.objects.prefetch_related(
+            "payments", "credit_notes__items"
+        ).all()
+        outstanding = sum((sale.balance for sale in outstanding_sales), 0)
+        return Response({
+            "date": today,
+            "sales_total": str(sales.aggregate(total=Sum("total"))["total"] or 0),
+            "sale_count": sales.count(),
+            "payments": payment_totals,
+            "low_stock_count": low_stock,
+            "inventory_attention_count": attention,
+            "outstanding_total": str(outstanding),
+        })
 
 
 class CustomPagination(PageNumberPagination):
@@ -63,6 +128,60 @@ class ProductViewSet(AuditLogMixin, ModelViewSet):
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
     permission_classes = [AdminWriteOrReadOnly]
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        requested_stock = int(serializer.validated_data.get("stock", 0))
+        instance = serializer.save(stock=0)
+        if requested_stock:
+            adjust_inventory(
+                product=instance,
+                quantity=requested_stock,
+                reason=InventoryMovement.OPENING,
+                user=self.request.user,
+                note="Opening stock",
+            )
+            instance.refresh_from_db()
+        self._log(AuditLog.CREATE, instance, {"after": self._snapshot(instance)})
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        before = self._snapshot(serializer.instance)
+        old_stock = serializer.instance.stock
+        requested_stock = int(serializer.validated_data.pop("stock", old_stock))
+        instance = serializer.save()
+        difference = requested_stock - old_stock
+        if difference:
+            adjust_inventory(
+                product=instance,
+                quantity=difference,
+                reason=InventoryMovement.CORRECTION,
+                user=self.request.user,
+                note="Stock count changed from product editor",
+            )
+            instance.refresh_from_db()
+        self._log(AuditLog.UPDATE, instance, {
+            "before": before,
+            "after": self._snapshot(instance),
+        })
+
+
+class InventoryMovementViewSet(ModelViewSet):
+    queryset = InventoryMovement.objects.select_related("product", "sale", "user").all()
+    serializer_class = InventoryMovementSerializer
+    permission_classes = [AdminWriteOrReadOnly]
+    http_method_names = ["get", "post", "head", "options"]
+
+    def perform_create(self, serializer):
+        movement = adjust_inventory(
+            product=serializer.validated_data["product"],
+            quantity=serializer.validated_data["quantity"],
+            reason=serializer.validated_data["reason"],
+            user=self.request.user,
+            note=serializer.validated_data.get("note", ""),
+            event_at=serializer.validated_data.get("event_at"),
+        )
+        serializer.instance = movement
 
 
 class CustomerViewSet(AuditLogMixin, ModelViewSet):

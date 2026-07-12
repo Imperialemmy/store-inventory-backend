@@ -8,6 +8,7 @@ from users.models import CustomUser
 from customers.models import Customer
 from inventory.models import Product
 from .models import Sale
+from inventory.models import InventoryMovement
 
 
 class SalesFlowTests(TestCase):
@@ -101,6 +102,172 @@ class SalesFlowTests(TestCase):
             "sale": sale["id"], "items": [{"sale_item": item_id, "quantity": 7}],
         }, format="json")
         self.assertEqual(res.status_code, 400)
+
+    def test_offline_sale_sync_is_idempotent_with_atomic_payment(self):
+        client_sale_id = "e57c6a88-1fa1-4c77-8ef1-87b386ba1fa2"
+        payload = {
+            "client_sale_id": client_sale_id,
+            "customer": self.customer.id,
+            "sold_at": "2026-07-11T09:15:00+01:00",
+            "device_id": "mum-phone",
+            "offline_created": True,
+            "items": [{"product": self.product.id, "quantity": 3}],
+            "initial_payment": {"amount": "3225.00", "method": "cash"},
+        }
+        first = self.client_api.post("/api/v1/sales/", payload, format="json")
+        second = self.client_api.post("/api/v1/sales/", payload, format="json")
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.json()["id"], second.json()["id"])
+        self.assertEqual(Sale.objects.filter(client_sale_id=client_sale_id).count(), 1)
+        sale = Sale.objects.get(client_sale_id=client_sale_id)
+        self.assertEqual(sale.payments.count(), 1)
+        self.assertEqual(
+            InventoryMovement.objects.filter(sale=sale, reason=InventoryMovement.SALE).count(),
+            1,
+        )
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 22)
+
+    def test_offline_sale_records_real_sale_and_flags_negative_stock(self):
+        res = self.client_api.post("/api/v1/sales/", {
+            "client_sale_id": "7e0c6f5f-dc70-444b-8ce5-26b935f667fc",
+            "customer": self.customer.id,
+            "offline_created": True,
+            "device_id": "mum-phone",
+            "items": [{"product": self.product.id, "quantity": 30}],
+        }, format="json")
+        self.assertEqual(res.status_code, 201)
+        self.assertTrue(res.json()["inventory_attention"])
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, -5)
+        movement = InventoryMovement.objects.get(sale_id=res.json()["id"])
+        self.assertEqual(movement.quantity, -30)
+        self.assertEqual(movement.stock_after, -5)
+
+    def test_invalid_initial_payment_rolls_back_sale_stock_and_movement(self):
+        res = self.client_api.post("/api/v1/sales/", {
+            "client_sale_id": "294be58a-4499-4eb1-873d-ecc61acf50dd",
+            "customer": self.customer.id,
+            "offline_created": True,
+            "items": [{"product": self.product.id, "quantity": 2}],
+            "initial_payment": {"amount": "999999.00", "method": "cash"},
+        }, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertFalse(Sale.objects.filter(
+            client_sale_id="294be58a-4499-4eb1-873d-ecc61acf50dd"
+        ).exists())
+        self.assertEqual(InventoryMovement.objects.count(), 0)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 25)
+
+    def test_payment_rejects_zero_negative_and_overpayment(self):
+        sale = self.create_sale(2).json()
+        for amount in ("0", "-1", "999999"):
+            res = self.client_api.post("/api/v1/payments/", {
+                "sale": sale["id"], "amount": amount, "method": "cash",
+            }, format="json")
+            self.assertEqual(res.status_code, 400)
+
+    def test_reused_client_id_with_different_payload_is_rejected(self):
+        client_sale_id = "785cf1ca-d4d0-4d68-9e3c-ea57619bc0f6"
+        first = self.client_api.post("/api/v1/sales/", {
+            "client_sale_id": client_sale_id,
+            "customer": self.customer.id,
+            "offline_created": True,
+            "items": [{"product": self.product.id, "quantity": 2}],
+        }, format="json")
+        second = self.client_api.post("/api/v1/sales/", {
+            "client_sale_id": client_sale_id,
+            "customer": self.customer.id,
+            "offline_created": True,
+            "items": [{"product": self.product.id, "quantity": 3}],
+        }, format="json")
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 409)
+        self.assertEqual(Sale.objects.filter(client_sale_id=client_sale_id).count(), 1)
+
+    def test_reused_client_id_with_different_price_is_rejected(self):
+        client_sale_id = "fc442d61-863b-4b56-9875-395ea633bdbf"
+        base = {
+            "client_sale_id": client_sale_id,
+            "customer": self.customer.id,
+            "offline_created": True,
+            "items": [{
+                "product": self.product.id, "quantity": 1, "unit_price": "1000.00",
+            }],
+        }
+        first = self.client_api.post("/api/v1/sales/", base, format="json")
+        changed = {
+            **base,
+            "items": [{
+                "product": self.product.id, "quantity": 1, "unit_price": "900.00",
+            }],
+        }
+        second = self.client_api.post("/api/v1/sales/", changed, format="json")
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 409)
+
+    def test_offline_stale_price_is_preserved_and_flagged(self):
+        res = self.client_api.post("/api/v1/sales/", {
+            "client_sale_id": "586e9416-f930-4ac5-b85c-d38cf471ac1d",
+            "customer": self.customer.id,
+            "offline_created": True,
+            "items": [{
+                "product": self.product.id,
+                "quantity": 1,
+                "unit_price": "900.00",
+            }],
+        }, format="json")
+        self.assertEqual(res.status_code, 201)
+        self.assertTrue(res.json()["pricing_attention"])
+        self.assertEqual(Decimal(res.json()["items"][0]["unit_price"]), Decimal("900.00"))
+
+    def test_seller_cannot_override_current_price_online(self):
+        seller = CustomUser.objects.create_user(
+            username="price-seller", email="price@example.com",
+            password="x", role="seller",
+        )
+        client = APIClient()
+        client.force_authenticate(seller)
+        res = client.post("/api/v1/sales/", {
+            "customer": self.customer.id,
+            "items": [{
+                "product": self.product.id,
+                "quantity": 1,
+                "unit_price": "1.00",
+            }],
+        }, format="json")
+        self.assertEqual(res.status_code, 400)
+
+    def test_duplicate_product_lines_are_rejected_without_side_effects(self):
+        res = self.client_api.post("/api/v1/sales/", {
+            "customer": self.customer.id,
+            "items": [
+                {"product": self.product.id, "quantity": 1},
+                {"product": self.product.id, "quantity": 2},
+            ],
+        }, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(Sale.objects.count(), 0)
+        self.assertEqual(InventoryMovement.objects.count(), 0)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 25)
+
+    def test_offline_sale_and_payment_use_actual_lagos_sale_date(self):
+        res = self.client_api.post("/api/v1/sales/", {
+            "client_sale_id": "76592bce-9dfa-4c46-ae33-e3bf8cc20fcf",
+            "customer": self.customer.id,
+            "offline_created": True,
+            # 23:30 UTC is already the following day in Lagos.
+            "sold_at": "2026-07-10T23:30:00Z",
+            "items": [{"product": self.product.id, "quantity": 1}],
+            "initial_payment": {"amount": "1075.00", "method": "cash"},
+        }, format="json")
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.json()["date"], "2026-07-11")
+        self.assertEqual(res.json()["payments"][0]["date"], "2026-07-11")
 
 
 class RolePermissionTests(TestCase):

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from inventory.models import Product
+from inventory.models import Product, InventoryMovement
 from customers.models import Customer, CustomerTag
 
 
@@ -8,7 +8,10 @@ class ProductSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Product
-        fields = ["id", "name", "image", "price", "stock", "created_at", "updated_at"]
+        fields = [
+            "id", "name", "image", "price", "cost_price", "stock",
+            "reorder_level", "created_at", "updated_at",
+        ]
         read_only_fields = ["created_at", "updated_at"]
 
     def validate_name(self, value):
@@ -75,3 +78,20 @@ class CustomerSerializer(serializers.ModelSerializer):
         if tag_names is not None:
             instance.tags.set(self._resolve_tags(tag_names))
         return instance
+
+
+class InventoryMovementSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source="product.name", read_only=True)
+    user_name = serializers.CharField(source="user.username", read_only=True)
+
+    class Meta:
+        model = InventoryMovement
+        fields = [
+            "id", "product", "product_name", "sale", "user_name", "quantity",
+            "stock_after", "reason", "client_reference", "device_id",
+            "event_at", "synced_at", "note", "created_at",
+        ]
+        read_only_fields = [
+            "sale", "user_name", "stock_after", "client_reference", "device_id",
+            "synced_at", "created_at",
+        ]

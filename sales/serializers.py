@@ -31,6 +31,20 @@ class PaymentSerializer(serializers.ModelSerializer):
         fields = ["id", "sale", "amount", "method", "method_display", "reference", "date", "created_at"]
         read_only_fields = ["created_at"]
 
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Payment amount must be greater than zero.")
+        return value
+
+    def validate(self, attrs):
+        sale = attrs.get("sale")
+        amount = attrs.get("amount")
+        if sale and amount and amount > sale.balance:
+            raise serializers.ValidationError(
+                {"amount": "Payment cannot be greater than the outstanding balance."}
+            )
+        return attrs
+
 
 class CreditNoteItemSerializer(serializers.ModelSerializer):
     sale_item = serializers.PrimaryKeyRelatedField(queryset=SaleItem.objects.all())
@@ -65,6 +79,7 @@ class CreditNoteSerializer(serializers.ModelSerializer):
 
 
 class SaleSerializer(serializers.ModelSerializer):
+    client_sale_id = serializers.UUIDField(required=False)
     items = SaleItemSerializer(many=True)
     payments = PaymentSerializer(many=True, read_only=True)
     credit_notes = CreditNoteSerializer(many=True, read_only=True)
@@ -75,23 +90,31 @@ class SaleSerializer(serializers.ModelSerializer):
     amount_credited = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     balance = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     payment_status = serializers.CharField(read_only=True)
+    initial_payment = serializers.DictField(write_only=True, required=False)
 
     class Meta:
         model = Sale
         fields = [
-            "id", "invoice_number", "customer", "customer_name",
+            "id", "client_sale_id", "invoice_number", "customer", "customer_name",
             "salesperson", "date", "discount", "vat_rate", "subtotal", "vat_amount",
             "total", "amount_paid", "amount_credited", "balance", "payment_status", "notes",
-            "items", "payments", "credit_notes", "created_at",
+            "items", "payments", "credit_notes", "sold_at", "synced_at", "device_id",
+            "offline_created", "inventory_attention", "pricing_attention",
+            "initial_payment", "created_at",
         ]
         read_only_fields = [
-            "invoice_number", "subtotal", "vat_amount", "total", "created_at",
+            "invoice_number", "subtotal", "vat_amount", "total", "synced_at",
+            "inventory_attention", "pricing_attention", "created_at",
         ]
+        extra_kwargs = {
+            "client_sale_id": {"validators": []},
+        }
 
     def create(self, validated_data):
         items = validated_data.pop("items")
+        payment = validated_data.pop("initial_payment", None)
         request = self.context.get("request")
-        return create_sale(
+        sale, _ = create_sale(
             user=request.user if request else None,
             customer=validated_data["customer"],
             items=[
@@ -102,4 +125,10 @@ class SaleSerializer(serializers.ModelSerializer):
             vat_rate=validated_data.get("vat_rate"),
             date=validated_data.get("date"),
             notes=validated_data.get("notes"),
+            client_sale_id=validated_data.get("client_sale_id"),
+            sold_at=validated_data.get("sold_at"),
+            device_id=validated_data.get("device_id"),
+            offline_created=validated_data.get("offline_created", False),
+            payment=payment,
         )
+        return sale
