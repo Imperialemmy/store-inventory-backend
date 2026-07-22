@@ -69,6 +69,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'api.middleware.ApiNoCacheMiddleware',
 ]
 
 CORS_ALLOWED_ORIGINS = config(
@@ -77,7 +78,7 @@ CORS_ALLOWED_ORIGINS = config(
     cast=Csv(),
 )
 CORS_ALLOW_CREDENTIALS = True
-DEFAULT_VAT_RATE = config("DEFAULT_VAT_RATE", default="7.5", cast=Decimal)
+DEFAULT_VAT_RATE = config("DEFAULT_VAT_RATE", default="0", cast=Decimal)
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = config("SECURE_SSL_REDIRECT", default=not DEBUG, cast=bool)
 SESSION_COOKIE_SECURE = config("SESSION_COOKIE_SECURE", default=not DEBUG, cast=bool)
@@ -171,12 +172,15 @@ REST_FRAMEWORK = {
     # 'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     # 'PAGE_SIZE': 10,
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'users.authentication.SingleSessionJWTAuthentication',
     ),
 }
 
 
 DJOSER = {
+    # The reset link emailed to users points at the frontend, which collects
+    # the new password and calls /auth/users/reset_password_confirm/.
+    'PASSWORD_RESET_CONFIRM_URL': 'reset-password/{uid}/{token}',
     'SERIALIZERS': {
         'LOGIN_FIELD': 'email',
         'user_create': 'users.serializers.CustomUserCreateSerializer',
@@ -185,6 +189,23 @@ DJOSER = {
 
     }
 }
+
+# Domain used inside the password-reset email link (your Vercel frontend).
+DOMAIN = config('FRONTEND_DOMAIN', default='localhost:5173')
+SITE_NAME = 'AkinFolu Foods'
+
+# Email delivery for password resets. With no SMTP credentials configured,
+# emails print to the server console (handy in development).
+EMAIL_HOST = config('EMAIL_HOST', default='')
+if EMAIL_HOST:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
+    EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+    EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+    EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='AkinFolu Foods <no-reply@akinfolufoods.local>')
 
 # Secret code required to register an Admin account (empty = admin signup
 # disabled except for the very first bootstrap user).

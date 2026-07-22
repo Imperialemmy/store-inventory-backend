@@ -30,7 +30,7 @@ class Sale(models.Model):
     pricing_attention = models.BooleanField(default=False)
 
     discount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    vat_rate = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("7.5"))
+    vat_rate = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0"))
 
     subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     vat_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)

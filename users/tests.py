@@ -67,3 +67,37 @@ class SignupGateTests(TestCase):
         token = APIClient().post("/api/v1/auth/jwt/create/",
                                  {"username": "seller1", "password": "Str0ngPass!23"}, format="json")
         self.assertEqual(token.status_code, 200)
+
+
+@override_settings(ADMIN_SIGNUP_CODE="SECRET123")
+class SingleSessionTests(TestCase):
+    def _login(self, username, password="Str0ngPass!23"):
+        return APIClient().post(
+            "/api/v1/auth/jwt/create/",
+            {"username": username, "password": password}, format="json").json()
+
+    def test_new_login_invalidates_previous_session(self):
+        signup(APIClient(), "owner")
+        first = self._login("owner")
+        client_a = APIClient()
+        client_a.credentials(HTTP_AUTHORIZATION=f"JWT {first['access']}")
+        self.assertEqual(client_a.get("/api/v1/products/").status_code, 200)
+
+        # Second login from another device kicks the first one out.
+        second = self._login("owner")
+        res = client_a.get("/api/v1/products/")
+        self.assertEqual(res.status_code, 401)
+        self.assertEqual(res.json().get("code"), "session_replaced")
+
+        client_b = APIClient()
+        client_b.credentials(HTTP_AUTHORIZATION=f"JWT {second['access']}")
+        self.assertEqual(client_b.get("/api/v1/products/").status_code, 200)
+
+
+class PasswordResetEndpointTests(TestCase):
+    def test_reset_password_endpoint_accepts_email(self):
+        signup(APIClient(), "owner")
+        res = APIClient().post(
+            "/api/v1/auth/users/reset_password/",
+            {"email": "owner@a.com"}, format="json")
+        self.assertEqual(res.status_code, 204)

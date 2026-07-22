@@ -92,3 +92,7 @@ class ProductTests(TestCase):
         )
         movement = InventoryMovement.objects.get(id=movement_id)
         self.assertIsNone(movement.product_id)
+
+    def test_api_responses_are_not_cacheable(self):
+        res = self.client_api.get("/api/v1/products/")
+        self.assertEqual(res["Cache-Control"], "no-store")
