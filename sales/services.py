@@ -124,6 +124,13 @@ def create_sale(*, user, customer, items, discount=Decimal("0"),
             reference=payment.get("reference") or None,
             date=sale.date,
         )
+
+    # A walk-in has no name to collect a debt from, so the sale must be
+    # settled in full at the till.
+    if customer.name == "Walk-in Customer" and sale.balance > 0:
+        raise ValidationError(
+            "Walk-in sales must be paid in full. Pick a named customer to sell on credit."
+        )
     return sale, True
 
 

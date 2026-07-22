@@ -1,3 +1,5 @@
+import uuid
+
 from django.conf import settings
 from django.db import transaction
 from djoser.serializers import UserCreateSerializer as BaseUserCreateSerializer
@@ -76,7 +78,13 @@ class UserAdminSerializer(serializers.ModelSerializer):
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user):
+        # Rotate the session so any earlier login's tokens stop working:
+        # one active session per account, newest login wins.
+        user.session_id = uuid.uuid4()
+        user.save(update_fields=["session_id"])
+
         token = super().get_token(user)
         token['username'] = user.username
         token['role'] = user.role
+        token['sid'] = str(user.session_id)
         return token

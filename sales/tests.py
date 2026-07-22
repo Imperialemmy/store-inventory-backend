@@ -310,3 +310,25 @@ class RolePermissionTests(TestCase):
         # Same record returned every time — no duplicate walk-in customers.
         self.assertEqual(first.json()["id"], second.json()["id"])
         self.assertEqual(Customer.objects.filter(name="Walk-in Customer").count(), 1)
+
+    def test_walk_in_sale_cannot_be_pay_later(self):
+        client = self._client(self.seller)
+        walk_in = client.get("/api/v1/customers/walk-in/").json()
+        product = Product.objects.create(name="Beans", price=Decimal("500"), stock=10)
+        res = client.post("/api/v1/sales/", {
+            "customer": walk_in["id"],
+            "items": [{"product": product.id, "quantity": 1}],
+        }, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(Sale.objects.count(), 0)
+
+    def test_walk_in_sale_paid_in_full_is_accepted(self):
+        client = self._client(self.seller)
+        walk_in = client.get("/api/v1/customers/walk-in/").json()
+        product = Product.objects.create(name="Oil", price=Decimal("1000"), stock=10)
+        res = client.post("/api/v1/sales/", {
+            "customer": walk_in["id"],
+            "items": [{"product": product.id, "quantity": 1}],
+            "initial_payment": {"amount": "1075.00", "method": "cash"},
+        }, format="json")
+        self.assertEqual(res.status_code, 201)
