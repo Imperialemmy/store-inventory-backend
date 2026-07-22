@@ -32,8 +32,8 @@ class SalesFlowTests(TestCase):
         data = res.json()
         self.assertEqual(Decimal(data["items"][0]["unit_price"]), Decimal("1000.00"))
         self.assertEqual(Decimal(data["subtotal"]), Decimal("8000.00"))
-        self.assertEqual(Decimal(data["vat_amount"]), Decimal("600.00"))  # 7.5%
-        self.assertEqual(Decimal(data["total"]), Decimal("8600.00"))
+        self.assertEqual(Decimal(data["vat_amount"]), Decimal("0.00"))  # prices are VAT-inclusive
+        self.assertEqual(Decimal(data["total"]), Decimal("8000.00"))
         self.assertEqual(data["payment_status"], "pending")
 
     def test_stock_decrements(self):
@@ -54,7 +54,7 @@ class SalesFlowTests(TestCase):
             "sale": sale["id"], "amount": "5000", "method": "transfer",
         }, format="json")
         detail = self.client_api.get(f"/api/v1/sales/{sale['id']}/").json()
-        self.assertEqual(Decimal(detail["balance"]), Decimal("3600.00"))
+        self.assertEqual(Decimal(detail["balance"]), Decimal("3000.00"))
         self.assertEqual(detail["payment_status"], "partial")
 
     def test_delete_sale_restores_stock(self):
@@ -72,12 +72,12 @@ class SalesFlowTests(TestCase):
             "items": [{"sale_item": item_id, "quantity": 4}],
         }, format="json")
         self.assertEqual(res.status_code, 201)
-        # 4 × 1000 × 1.075 = 4300
-        self.assertEqual(Decimal(res.json()["amount"]), Decimal("4300.00"))
+        # 4 × 1000, no VAT
+        self.assertEqual(Decimal(res.json()["amount"]), Decimal("4000.00"))
         self.product.refresh_from_db()
         self.assertEqual(self.product.stock, 19)  # 25 - 10 + 4
         detail = self.client_api.get(f"/api/v1/sales/{sale['id']}/").json()
-        self.assertEqual(Decimal(detail["amount_credited"]), Decimal("4300.00"))
+        self.assertEqual(Decimal(detail["amount_credited"]), Decimal("4000.00"))
         self.assertEqual(detail["items"][0]["returned_quantity"], 4)
 
     def test_delete_sale_with_returns_does_not_double_restock(self):
@@ -112,7 +112,7 @@ class SalesFlowTests(TestCase):
             "device_id": "mum-phone",
             "offline_created": True,
             "items": [{"product": self.product.id, "quantity": 3}],
-            "initial_payment": {"amount": "3225.00", "method": "cash"},
+            "initial_payment": {"amount": "3000.00", "method": "cash"},
         }
         first = self.client_api.post("/api/v1/sales/", payload, format="json")
         second = self.client_api.post("/api/v1/sales/", payload, format="json")
@@ -263,7 +263,7 @@ class SalesFlowTests(TestCase):
             # 23:30 UTC is already the following day in Lagos.
             "sold_at": "2026-07-10T23:30:00Z",
             "items": [{"product": self.product.id, "quantity": 1}],
-            "initial_payment": {"amount": "1075.00", "method": "cash"},
+            "initial_payment": {"amount": "1000.00", "method": "cash"},
         }, format="json")
         self.assertEqual(res.status_code, 201)
         self.assertEqual(res.json()["date"], "2026-07-11")
@@ -329,6 +329,6 @@ class RolePermissionTests(TestCase):
         res = client.post("/api/v1/sales/", {
             "customer": walk_in["id"],
             "items": [{"product": product.id, "quantity": 1}],
-            "initial_payment": {"amount": "1075.00", "method": "cash"},
+            "initial_payment": {"amount": "1000.00", "method": "cash"},
         }, format="json")
         self.assertEqual(res.status_code, 201)

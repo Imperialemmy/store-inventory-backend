@@ -78,7 +78,7 @@ CORS_ALLOWED_ORIGINS = config(
     cast=Csv(),
 )
 CORS_ALLOW_CREDENTIALS = True
-DEFAULT_VAT_RATE = config("DEFAULT_VAT_RATE", default="7.5", cast=Decimal)
+DEFAULT_VAT_RATE = config("DEFAULT_VAT_RATE", default="0", cast=Decimal)
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = config("SECURE_SSL_REDIRECT", default=not DEBUG, cast=bool)
 SESSION_COOKIE_SECURE = config("SESSION_COOKIE_SECURE", default=not DEBUG, cast=bool)
