@@ -2,8 +2,8 @@ from decimal import Decimal
 from rest_framework import serializers
 from inventory.models import Product
 from customers.models import Customer
-from .models import Sale, SaleItem, Payment, CreditNote, CreditNoteItem
-from .services import create_sale, create_credit_note, credited_quantity
+from .models import Sale, SaleItem, Payment, Refund, CreditNote, CreditNoteItem
+from .services import create_sale, create_credit_note, create_refund, credited_quantity
 
 
 class SaleItemSerializer(serializers.ModelSerializer):
@@ -46,6 +46,30 @@ class PaymentSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class RefundSerializer(serializers.ModelSerializer):
+    method_display = serializers.CharField(source="get_method_display", read_only=True)
+    sale = serializers.PrimaryKeyRelatedField(queryset=Sale.objects.all())
+    recorded_by = serializers.CharField(source="user.username", read_only=True)
+
+    class Meta:
+        model = Refund
+        fields = [
+            "id", "sale", "amount", "method", "method_display", "reference",
+            "date", "recorded_by", "created_at",
+        ]
+        read_only_fields = ["date", "recorded_by", "created_at"]
+
+    def create(self, validated_data):
+        request = self.context.get("request")
+        return create_refund(
+            sale=validated_data["sale"],
+            amount=validated_data["amount"],
+            method=validated_data.get("method", Refund.CASH),
+            reference=validated_data.get("reference"),
+            user=request.user if request else None,
+        )
+
+
 class CreditNoteItemSerializer(serializers.ModelSerializer):
     sale_item = serializers.PrimaryKeyRelatedField(queryset=SaleItem.objects.all())
     product_name = serializers.CharField(source="sale_item.product.name", read_only=True)
@@ -82,12 +106,14 @@ class SaleSerializer(serializers.ModelSerializer):
     client_sale_id = serializers.UUIDField(required=False)
     items = SaleItemSerializer(many=True)
     payments = PaymentSerializer(many=True, read_only=True)
+    refunds = RefundSerializer(many=True, read_only=True)
     credit_notes = CreditNoteSerializer(many=True, read_only=True)
     customer = serializers.PrimaryKeyRelatedField(queryset=Customer.objects.all())
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     salesperson = serializers.CharField(source="user.username", read_only=True)
     amount_paid = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     amount_credited = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    amount_refunded = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     balance = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     net_total = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     receivable = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
@@ -101,9 +127,10 @@ class SaleSerializer(serializers.ModelSerializer):
         fields = [
             "id", "client_sale_id", "invoice_number", "customer", "customer_name",
             "salesperson", "date", "discount", "vat_rate", "subtotal", "vat_amount",
-            "total", "amount_paid", "amount_credited", "net_total", "receivable",
+            "total", "amount_paid", "amount_credited", "amount_refunded",
+            "net_total", "receivable",
             "refund_due", "balance", "payment_status", "return_status", "notes",
-            "items", "payments", "credit_notes", "sold_at", "synced_at", "device_id",
+            "items", "payments", "refunds", "credit_notes", "sold_at", "synced_at", "device_id",
             "offline_created", "inventory_attention", "pricing_attention",
             "initial_payment", "created_at",
         ]

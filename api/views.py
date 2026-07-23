@@ -96,7 +96,7 @@ class OperationsSummaryView(APIView):
         low_stock = Product.objects.filter(stock__lte=models.F("reorder_level")).count()
         attention = Sale.objects.filter(inventory_attention=True).count()
         outstanding_sales = Sale.objects.prefetch_related(
-            "payments", "credit_notes__items"
+            "payments", "refunds", "credit_notes__items"
         ).all()
         outstanding = sum(
             (sale.receivable for sale in outstanding_sales), Decimal("0")
@@ -230,7 +230,7 @@ class NotificationsView(APIView):
 
         items = []
         sales = Sale.objects.select_related("customer").prefetch_related(
-            "payments", "credit_notes__items"
+            "payments", "refunds", "credit_notes__items"
         ).filter(date__lte=cutoff)
         for sale in sales:
             if sale.receivable > 0:

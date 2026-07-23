@@ -4,7 +4,7 @@ from .views import (
     ProductViewSet, CustomerViewSet, NotificationsView,
     HealthView, OperationsSummaryView, InventoryMovementViewSet,
 )
-from sales.views import SaleViewSet, PaymentViewSet, CreditNoteViewSet
+from sales.views import SaleViewSet, PaymentViewSet, RefundViewSet, CreditNoteViewSet
 from users.views import UserAdminViewSet, AccountStatusView
 
 router = DefaultRouter()
@@ -12,6 +12,7 @@ router.register(r'products', ProductViewSet)
 router.register(r'customers', CustomerViewSet)
 router.register(r'sales', SaleViewSet)
 router.register(r'payments', PaymentViewSet)
+router.register(r'refunds', RefundViewSet)
 router.register(r'credit-notes', CreditNoteViewSet)
 router.register(r'users', UserAdminViewSet)
 router.register(r'inventory-movements', InventoryMovementViewSet)

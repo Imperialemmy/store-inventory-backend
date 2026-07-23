@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 from users.models import CustomUser
 from customers.models import Customer
 from inventory.models import Product
-from .models import Sale
+from .models import Sale, Refund
 from inventory.models import InventoryMovement
 
 
@@ -115,6 +115,80 @@ class SalesFlowTests(TestCase):
         self.assertEqual(Decimal(detail["receivable"]), Decimal("0.00"))
         self.assertEqual(Decimal(detail["refund_due"]), Decimal("5000.00"))
         self.assertEqual(Decimal(detail["balance"]), Decimal("-5000.00"))
+
+    def test_partial_and_full_refunds_settle_the_liability(self):
+        sale = self.create_sale(5).json()
+        self.client_api.post("/api/v1/payments/", {
+            "sale": sale["id"], "amount": "5000", "method": "cash",
+        }, format="json")
+        item_id = sale["items"][0]["id"]
+        self.client_api.post("/api/v1/credit-notes/", {
+            "sale": sale["id"],
+            "items": [{"sale_item": item_id, "quantity": 5}],
+        }, format="json")
+
+        first = self.client_api.post("/api/v1/refunds/", {
+            "sale": sale["id"], "amount": "2000", "method": "cash",
+            "reference": "CASH-REF-1",
+        }, format="json")
+        self.assertEqual(first.status_code, 201)
+        detail = self.client_api.get(f"/api/v1/sales/{sale['id']}/").json()
+        self.assertEqual(Decimal(detail["amount_refunded"]), Decimal("2000.00"))
+        self.assertEqual(Decimal(detail["refund_due"]), Decimal("3000.00"))
+        self.assertEqual(detail["refunds"][0]["recorded_by"], "admin")
+
+        second = self.client_api.post("/api/v1/refunds/", {
+            "sale": sale["id"], "amount": "3000", "method": "transfer",
+            "reference": "TRF-REF-2",
+        }, format="json")
+        self.assertEqual(second.status_code, 201)
+        detail = self.client_api.get(f"/api/v1/sales/{sale['id']}/").json()
+        self.assertEqual(Decimal(detail["amount_refunded"]), Decimal("5000.00"))
+        self.assertEqual(Decimal(detail["refund_due"]), Decimal("0.00"))
+        self.assertEqual(Decimal(detail["balance"]), Decimal("0.00"))
+        self.assertEqual(len(detail["refunds"]), 2)
+
+    def test_refund_cannot_exceed_the_remaining_liability(self):
+        sale = self.create_sale(2).json()
+        self.client_api.post("/api/v1/payments/", {
+            "sale": sale["id"], "amount": "2000", "method": "cash",
+        }, format="json")
+        item_id = sale["items"][0]["id"]
+        self.client_api.post("/api/v1/credit-notes/", {
+            "sale": sale["id"],
+            "items": [{"sale_item": item_id, "quantity": 2}],
+        }, format="json")
+
+        response = self.client_api.post("/api/v1/refunds/", {
+            "sale": sale["id"], "amount": "2000.01", "method": "cash",
+        }, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Refund.objects.count(), 0)
+
+    def test_refund_is_blocked_when_nothing_is_due(self):
+        sale = self.create_sale(1).json()
+        response = self.client_api.post("/api/v1/refunds/", {
+            "sale": sale["id"], "amount": "1", "method": "cash",
+        }, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Refund.objects.count(), 0)
+
+    def test_settled_refund_is_removed_from_operations_summary(self):
+        sale = self.create_sale(4).json()
+        self.client_api.post("/api/v1/payments/", {
+            "sale": sale["id"], "amount": "4000", "method": "cash",
+        }, format="json")
+        item_id = sale["items"][0]["id"]
+        self.client_api.post("/api/v1/credit-notes/", {
+            "sale": sale["id"],
+            "items": [{"sale_item": item_id, "quantity": 4}],
+        }, format="json")
+        self.client_api.post("/api/v1/refunds/", {
+            "sale": sale["id"], "amount": "4000", "method": "cash",
+        }, format="json")
+
+        summary = self.client_api.get("/api/v1/operations-summary/").json()
+        self.assertEqual(Decimal(summary["refunds_due_total"]), Decimal("0.00"))
 
     def test_paid_partial_return_exposes_only_the_refund(self):
         sale = self.create_sale(6).json()

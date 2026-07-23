@@ -8,8 +8,10 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 from api.views import AuditLogMixin, CustomPagination
 from inventory.models import AuditLog
-from .models import Sale, Payment, CreditNote
-from .serializers import SaleSerializer, PaymentSerializer, CreditNoteSerializer
+from .models import Sale, Payment, Refund, CreditNote
+from .serializers import (
+    SaleSerializer, PaymentSerializer, RefundSerializer, CreditNoteSerializer,
+)
 from .services import delete_sale
 
 
@@ -26,7 +28,7 @@ class SalesAccess(BasePermission):
 class SaleViewSet(AuditLogMixin, ModelViewSet):
     """Sales: list (paginated, ?customer=<id> filter), detail, create, delete."""
     queryset = Sale.objects.select_related("customer", "user").prefetch_related(
-        "items__product", "payments", "credit_notes__items"
+        "items__product", "payments", "refunds", "credit_notes__items"
     ).all()
     serializer_class = SaleSerializer
     permission_classes = [SalesAccess]
@@ -98,6 +100,14 @@ class PaymentViewSet(AuditLogMixin, ModelViewSet):
 
     def perform_create(self, serializer):
         super().perform_create(serializer)
+
+
+class RefundViewSet(AuditLogMixin, ModelViewSet):
+    """Record customer refund payouts. History is read through the sale."""
+    queryset = Refund.objects.select_related("sale", "sale__customer", "user").all()
+    serializer_class = RefundSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["post", "head", "options"]
 
 
 class CreditNoteViewSet(AuditLogMixin, ModelViewSet):

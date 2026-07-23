@@ -5,7 +5,7 @@ from django.utils.timezone import localtime, now
 from django.conf import settings
 from rest_framework.exceptions import ValidationError
 from inventory.models import Product, InventoryMovement
-from .models import Sale, SaleItem, Payment, CreditNote, CreditNoteItem
+from .models import Sale, SaleItem, Payment, Refund, CreditNote, CreditNoteItem
 
 
 def credited_quantity(sale_item):
@@ -199,3 +199,25 @@ def create_credit_note(*, sale, items, user=None, reason=None):
         )
 
     return note
+
+
+@transaction.atomic
+def create_refund(*, sale, amount, method, user=None, reference=None):
+    """Record money paid back against a sale's current refund liability."""
+    locked_sale = Sale.objects.select_for_update().get(pk=sale.pk)
+    amount = Decimal(str(amount))
+    if amount <= 0:
+        raise ValidationError("Refund amount must be greater than zero.")
+    if method not in {choice[0] for choice in Refund.METHOD_CHOICES}:
+        raise ValidationError("Choose a valid refund method.")
+    if amount > locked_sale.refund_due:
+        raise ValidationError(
+            f"Refund cannot exceed the remaining refund due of {locked_sale.refund_due}."
+        )
+    return Refund.objects.create(
+        sale=locked_sale,
+        user=user,
+        amount=amount,
+        method=method,
+        reference=reference or None,
+    )

@@ -79,6 +79,12 @@ class Sale(models.Model):
         return total
 
     @property
+    def amount_refunded(self):
+        if "refunds" in getattr(self, "_prefetched_objects_cache", {}):
+            return sum((refund.amount for refund in self.refunds.all()), Decimal("0"))
+        return self.refunds.aggregate(total=models.Sum("amount"))["total"] or Decimal("0")
+
+    @property
     def net_total(self):
         """Invoice value after all credit notes, never below zero."""
         return max(self.total - self.amount_credited, Decimal("0"))
@@ -86,12 +92,12 @@ class Sale(models.Model):
     @property
     def receivable(self):
         """Amount the customer still owes on this invoice."""
-        return max(self.net_total - self.amount_paid, Decimal("0"))
+        return max(self.balance, Decimal("0"))
 
     @property
     def refund_due(self):
         """Amount the business owes the customer after returns."""
-        return max(self.amount_paid - self.net_total, Decimal("0"))
+        return max(-self.balance, Decimal("0"))
 
     @property
     def return_status(self):
@@ -113,15 +119,16 @@ class Sale(models.Model):
     @property
     def balance(self):
         """Signed compatibility field: positive is owed, negative is refundable."""
-        return self.net_total - self.amount_paid
+        return self.net_total - self.amount_paid + self.amount_refunded
 
     @property
     def payment_status(self):
+        net_paid = self.amount_paid - self.amount_refunded
         if self.net_total <= 0:
             return self.PAID
-        if self.amount_paid <= 0:
+        if net_paid <= 0:
             return self.PENDING
-        if self.amount_paid >= self.net_total:
+        if net_paid >= self.net_total:
             return self.PAID
         return self.PARTIAL
 
@@ -193,3 +200,27 @@ class Payment(models.Model):
 
     def __str__(self):
         return f"{self.amount} ({self.get_method_display()}) on {self.sale}"
+
+
+class Refund(models.Model):
+    """Money paid back to a customer to settle a return credit."""
+    CASH = Payment.CASH
+    TRANSFER = Payment.TRANSFER
+    POS = Payment.POS
+    METHOD_CHOICES = Payment.METHOD_CHOICES
+
+    sale = models.ForeignKey(Sale, related_name="refunds", on_delete=models.CASCADE)
+    user = models.ForeignKey(
+        CustomUser, related_name="refunds_issued", on_delete=models.SET_NULL, null=True
+    )
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    method = models.CharField(max_length=20, choices=METHOD_CHOICES, default=CASH)
+    reference = models.CharField(max_length=100, blank=True, null=True)
+    date = models.DateField(default=localdate)
+    created_at = models.DateTimeField(default=now)
+
+    class Meta:
+        ordering = ["-date", "-created_at"]
+
+    def __str__(self):
+        return f"Refund {self.amount} ({self.get_method_display()}) on {self.sale}"
