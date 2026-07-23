@@ -4,7 +4,8 @@ from .models import Product, AuditLog
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ("name", "price", "stock")
+    list_display = ("name", "category", "price", "stock")
+    list_filter = ("category",)
     search_fields = ("name",)
 
 
