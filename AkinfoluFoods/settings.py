@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 import os
+import sys
 from pathlib import Path
 from decouple import config, Csv
 from datetime import timedelta
@@ -41,6 +42,8 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
+    'channels',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -112,6 +115,22 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'AkinfoluFoods.wsgi.application'
+ASGI_APPLICATION = 'AkinfoluFoods.asgi.application'
+
+REDIS_URL = config('REDIS_URL', default='')
+if REDIS_URL and 'test' not in sys.argv:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {'hosts': [REDIS_URL]},
+        },
+    }
+else:
+    # Development and single-process deployments work without an extra
+    # service. Configure REDIS_URL when multiple backend instances are used.
+    CHANNEL_LAYERS = {
+        'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'},
+    }
 
 
 # Database
