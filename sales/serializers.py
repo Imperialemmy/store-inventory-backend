@@ -39,7 +39,7 @@ class PaymentSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         sale = attrs.get("sale")
         amount = attrs.get("amount")
-        if sale and amount and amount > sale.balance:
+        if sale and amount and amount > sale.receivable:
             raise serializers.ValidationError(
                 {"amount": "Payment cannot be greater than the outstanding balance."}
             )
@@ -89,6 +89,10 @@ class SaleSerializer(serializers.ModelSerializer):
     amount_paid = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     amount_credited = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     balance = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    net_total = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    receivable = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    refund_due = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    return_status = serializers.CharField(read_only=True)
     payment_status = serializers.CharField(read_only=True)
     initial_payment = serializers.DictField(write_only=True, required=False)
 
@@ -97,7 +101,8 @@ class SaleSerializer(serializers.ModelSerializer):
         fields = [
             "id", "client_sale_id", "invoice_number", "customer", "customer_name",
             "salesperson", "date", "discount", "vat_rate", "subtotal", "vat_amount",
-            "total", "amount_paid", "amount_credited", "balance", "payment_status", "notes",
+            "total", "amount_paid", "amount_credited", "net_total", "receivable",
+            "refund_due", "balance", "payment_status", "return_status", "notes",
             "items", "payments", "credit_notes", "sold_at", "synced_at", "device_id",
             "offline_created", "inventory_attention", "pricing_attention",
             "initial_payment", "created_at",

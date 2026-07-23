@@ -12,6 +12,9 @@ class Sale(models.Model):
     PENDING = "pending"
     PARTIAL = "partial"
     PAID = "paid"
+    RETURN_NONE = "none"
+    RETURN_PARTIAL = "partial"
+    RETURN_FULL = "full"
 
     user = models.ForeignKey(
         CustomUser, related_name="sales", on_delete=models.SET_NULL, null=True
@@ -76,15 +79,49 @@ class Sale(models.Model):
         return total
 
     @property
+    def net_total(self):
+        """Invoice value after all credit notes, never below zero."""
+        return max(self.total - self.amount_credited, Decimal("0"))
+
+    @property
+    def receivable(self):
+        """Amount the customer still owes on this invoice."""
+        return max(self.net_total - self.amount_paid, Decimal("0"))
+
+    @property
+    def refund_due(self):
+        """Amount the business owes the customer after returns."""
+        return max(self.amount_paid - self.net_total, Decimal("0"))
+
+    @property
+    def return_status(self):
+        sold_units = sum((item.quantity for item in self.items.all()), 0)
+        returned_units = sum(
+            (
+                item.quantity
+                for note in self.credit_notes.all()
+                for item in note.items.all()
+            ),
+            0,
+        )
+        if returned_units <= 0:
+            return self.RETURN_NONE
+        if sold_units > 0 and returned_units >= sold_units:
+            return self.RETURN_FULL
+        return self.RETURN_PARTIAL
+
+    @property
     def balance(self):
-        return self.total - self.amount_paid - self.amount_credited
+        """Signed compatibility field: positive is owed, negative is refundable."""
+        return self.net_total - self.amount_paid
 
     @property
     def payment_status(self):
-        settled = self.amount_paid + self.amount_credited
-        if settled <= 0:
+        if self.net_total <= 0:
+            return self.PAID
+        if self.amount_paid <= 0:
             return self.PENDING
-        if settled >= self.total:
+        if self.amount_paid >= self.net_total:
             return self.PAID
         return self.PARTIAL
 

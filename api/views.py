@@ -1,4 +1,6 @@
 from rest_framework.viewsets import ModelViewSet
+from decimal import Decimal
+
 from django.db import models, transaction
 from rest_framework.views import APIView
 from rest_framework.decorators import action
@@ -96,7 +98,12 @@ class OperationsSummaryView(APIView):
         outstanding_sales = Sale.objects.prefetch_related(
             "payments", "credit_notes__items"
         ).all()
-        outstanding = sum((sale.balance for sale in outstanding_sales), 0)
+        outstanding = sum(
+            (sale.receivable for sale in outstanding_sales), Decimal("0")
+        )
+        refunds_due = sum(
+            (sale.refund_due for sale in outstanding_sales), Decimal("0")
+        )
         return Response({
             "date": today,
             "sales_total": str(sales.aggregate(total=Sum("total"))["total"] or 0),
@@ -105,6 +112,7 @@ class OperationsSummaryView(APIView):
             "low_stock_count": low_stock,
             "inventory_attention_count": attention,
             "outstanding_total": str(outstanding),
+            "refunds_due_total": str(refunds_due),
         })
 
 
@@ -221,11 +229,14 @@ class NotificationsView(APIView):
         cutoff = today - timedelta(days=overdue_days)
 
         items = []
-        for sale in Sale.objects.select_related("customer").filter(date__lte=cutoff):
-            if sale.balance > 0:
+        sales = Sale.objects.select_related("customer").prefetch_related(
+            "payments", "credit_notes__items"
+        ).filter(date__lte=cutoff)
+        for sale in sales:
+            if sale.receivable > 0:
                 items.append({
                     "type": "overdue_invoice",
-                    "message": f"{sale.invoice_number} — {sale.customer.name} owes ₦{sale.balance:,.2f} ({(today - sale.date).days} days).",
+                    "message": f"{sale.invoice_number} — {sale.customer.name} owes ₦{sale.receivable:,.2f} ({(today - sale.date).days} days).",
                     "link": f"/sales/{sale.id}",
                 })
         return Response({"count": len(items), "items": items})

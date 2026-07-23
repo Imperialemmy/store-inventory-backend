@@ -79,6 +79,91 @@ class SalesFlowTests(TestCase):
         detail = self.client_api.get(f"/api/v1/sales/{sale['id']}/").json()
         self.assertEqual(Decimal(detail["amount_credited"]), Decimal("4000.00"))
         self.assertEqual(detail["items"][0]["returned_quantity"], 4)
+        self.assertEqual(Decimal(detail["net_total"]), Decimal("6000.00"))
+        self.assertEqual(Decimal(detail["receivable"]), Decimal("6000.00"))
+        self.assertEqual(Decimal(detail["refund_due"]), Decimal("0.00"))
+        self.assertEqual(detail["return_status"], "partial")
+        self.assertEqual(detail["payment_status"], "pending")
+
+    def test_unpaid_full_return_has_no_receivable_or_refund(self):
+        sale = self.create_sale(3).json()
+        item_id = sale["items"][0]["id"]
+        self.client_api.post("/api/v1/credit-notes/", {
+            "sale": sale["id"],
+            "items": [{"sale_item": item_id, "quantity": 3}],
+        }, format="json")
+
+        detail = self.client_api.get(f"/api/v1/sales/{sale['id']}/").json()
+        self.assertEqual(detail["return_status"], "full")
+        self.assertEqual(Decimal(detail["net_total"]), Decimal("0.00"))
+        self.assertEqual(Decimal(detail["receivable"]), Decimal("0.00"))
+        self.assertEqual(Decimal(detail["refund_due"]), Decimal("0.00"))
+
+    def test_paid_full_return_exposes_refund_due(self):
+        sale = self.create_sale(5).json()
+        self.client_api.post("/api/v1/payments/", {
+            "sale": sale["id"], "amount": "5000", "method": "cash",
+        }, format="json")
+        item_id = sale["items"][0]["id"]
+        self.client_api.post("/api/v1/credit-notes/", {
+            "sale": sale["id"],
+            "items": [{"sale_item": item_id, "quantity": 5}],
+        }, format="json")
+
+        detail = self.client_api.get(f"/api/v1/sales/{sale['id']}/").json()
+        self.assertEqual(detail["return_status"], "full")
+        self.assertEqual(Decimal(detail["receivable"]), Decimal("0.00"))
+        self.assertEqual(Decimal(detail["refund_due"]), Decimal("5000.00"))
+        self.assertEqual(Decimal(detail["balance"]), Decimal("-5000.00"))
+
+    def test_paid_partial_return_exposes_only_the_refund(self):
+        sale = self.create_sale(6).json()
+        self.client_api.post("/api/v1/payments/", {
+            "sale": sale["id"], "amount": "6000", "method": "transfer",
+        }, format="json")
+        item_id = sale["items"][0]["id"]
+        self.client_api.post("/api/v1/credit-notes/", {
+            "sale": sale["id"],
+            "items": [{"sale_item": item_id, "quantity": 2}],
+        }, format="json")
+
+        detail = self.client_api.get(f"/api/v1/sales/{sale['id']}/").json()
+        self.assertEqual(detail["return_status"], "partial")
+        self.assertEqual(Decimal(detail["net_total"]), Decimal("4000.00"))
+        self.assertEqual(Decimal(detail["receivable"]), Decimal("0.00"))
+        self.assertEqual(Decimal(detail["refund_due"]), Decimal("2000.00"))
+
+    def test_operations_summary_separates_receivables_and_refunds(self):
+        self.create_sale(10)
+        returned_sale = self.create_sale(5).json()
+        self.client_api.post("/api/v1/payments/", {
+            "sale": returned_sale["id"], "amount": "5000", "method": "cash",
+        }, format="json")
+        item_id = returned_sale["items"][0]["id"]
+        self.client_api.post("/api/v1/credit-notes/", {
+            "sale": returned_sale["id"],
+            "items": [{"sale_item": item_id, "quantity": 5}],
+        }, format="json")
+
+        summary = self.client_api.get("/api/v1/operations-summary/").json()
+        self.assertEqual(Decimal(summary["outstanding_total"]), Decimal("10000.00"))
+        self.assertEqual(Decimal(summary["refunds_due_total"]), Decimal("5000.00"))
+
+    def test_fully_returned_invoice_is_not_reported_as_overdue(self):
+        old_date = date.today() - timedelta(days=30)
+        sale = self.client_api.post("/api/v1/sales/", {
+            "customer": self.customer.id,
+            "date": old_date.isoformat(),
+            "items": [{"product": self.product.id, "quantity": 2}],
+        }, format="json").json()
+        item_id = sale["items"][0]["id"]
+        self.client_api.post("/api/v1/credit-notes/", {
+            "sale": sale["id"],
+            "items": [{"sale_item": item_id, "quantity": 2}],
+        }, format="json")
+
+        notifications = self.client_api.get("/api/v1/notifications/").json()
+        self.assertEqual(notifications["count"], 0)
 
     def test_delete_sale_with_returns_does_not_double_restock(self):
         sale = self.create_sale(10).json()  # stock 25 -> 15
