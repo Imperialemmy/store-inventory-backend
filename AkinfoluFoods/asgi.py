@@ -18,13 +18,13 @@ django_application = get_asgi_application()
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.security.websocket import OriginValidator
 from django.conf import settings
-from api.realtime_auth import QueryStringJWTAuthMiddleware
+from api.realtime_auth import WebSocketTicketAuthMiddleware
 from api.routing import websocket_urlpatterns
 
 application = ProtocolTypeRouter({
     "http": django_application,
     "websocket": OriginValidator(
-        QueryStringJWTAuthMiddleware(URLRouter(websocket_urlpatterns)),
+        WebSocketTicketAuthMiddleware(URLRouter(websocket_urlpatterns)),
         settings.CORS_ALLOWED_ORIGINS,
     ),
 })

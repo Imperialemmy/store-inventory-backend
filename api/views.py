@@ -15,6 +15,7 @@ from customers.models import Customer
 from .serializers import (
     ProductSerializer, CustomerSerializer, InventoryMovementSerializer,
 )
+from .realtime_auth import create_websocket_ticket
 import logging
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,13 @@ class HealthView(APIView):
             "status": "ok",
             "default_vat_rate": str(settings.DEFAULT_VAT_RATE),
         })
+
+
+class RealtimeTicketView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        return Response({"ticket": create_websocket_ticket(request.user)})
 
 
 class OperationsSummaryView(APIView):
