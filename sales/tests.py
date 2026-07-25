@@ -36,6 +36,31 @@ class SalesFlowTests(TestCase):
         self.assertEqual(Decimal(data["total"]), Decimal("8000.00"))
         self.assertEqual(data["payment_status"], "pending")
 
+    def test_invoice_directory_search_date_filter_and_pagination_metadata(self):
+        first = self.client_api.post("/api/v1/sales/", {
+            "customer": self.customer.id,
+            "date": "2026-07-01",
+            "items": [{"product": self.product.id, "quantity": 1}],
+        }, format="json").json()
+        second_customer = Customer.objects.create(user=self.admin, name="Hope Stores")
+        second = self.client_api.post("/api/v1/sales/", {
+            "customer": second_customer.id,
+            "date": "2026-07-15",
+            "items": [{"product": self.product.id, "quantity": 1}],
+        }, format="json").json()
+
+        response = self.client_api.get(
+            "/api/v1/sales/?search=Hope&date_from=2026-07-10&date_to=2026-07-31&page_size=25"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["count"], 1)
+        self.assertEqual(data["page"], 1)
+        self.assertEqual(data["page_size"], 25)
+        self.assertEqual(data["total_pages"], 1)
+        self.assertEqual(data["results"][0]["id"], second["id"])
+        self.assertNotEqual(first["id"], second["id"])
+
     def test_stock_decrements(self):
         self.create_sale(8)
         self.product.refresh_from_db()

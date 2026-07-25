@@ -4,7 +4,9 @@ from rest_framework.response import Response
 from django.db import IntegrityError
 from decimal import Decimal, InvalidOperation
 from rest_framework.permissions import IsAuthenticated, BasePermission
+from rest_framework.filters import OrderingFilter, SearchFilter
 from django_filters.rest_framework import DjangoFilterBackend
+from django_filters import rest_framework as filters
 
 from api.views import AuditLogMixin, CustomPagination
 from inventory.models import AuditLog
@@ -25,6 +27,15 @@ class SalesAccess(BasePermission):
         return True
 
 
+class SaleFilter(filters.FilterSet):
+    date_from = filters.DateFilter(field_name="date", lookup_expr="gte")
+    date_to = filters.DateFilter(field_name="date", lookup_expr="lte")
+
+    class Meta:
+        model = Sale
+        fields = ["customer", "date_from", "date_to"]
+
+
 class SaleViewSet(AuditLogMixin, ModelViewSet):
     """Sales: list (paginated, ?customer=<id> filter), detail, create, delete."""
     queryset = Sale.objects.select_related("customer", "user").prefetch_related(
@@ -33,8 +44,11 @@ class SaleViewSet(AuditLogMixin, ModelViewSet):
     serializer_class = SaleSerializer
     permission_classes = [SalesAccess]
     pagination_class = CustomPagination
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ["customer"]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = SaleFilter
+    search_fields = ["invoice_number", "customer__name"]
+    ordering_fields = ["date", "created_at", "invoice_number"]
+    ordering = ["-date", "-id"]
     http_method_names = ["get", "post", "delete", "head", "options"]
 
     def _same_idempotent_request(self, sale, data):

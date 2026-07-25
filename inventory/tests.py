@@ -17,9 +17,22 @@ class ProductTests(TestCase):
         self.client_api.post("/api/v1/products/", {"name": "Yam", "price": "500", "stock": 10}, format="json")
         self.client_api.post("/api/v1/products/", {"name": "Rice", "price": "1000", "stock": 20}, format="json")
         listed = self.client_api.get("/api/v1/products/").json()
-        self.assertEqual(len(listed), 2)
-        # plain array (unpaginated), ordered A–Z; the frontend filters client-side
-        self.assertEqual([p["name"] for p in listed], ["Rice", "Yam"])
+        self.assertEqual(listed["count"], 2)
+        self.assertEqual([p["name"] for p in listed["results"]], ["Rice", "Yam"])
+
+    def test_product_directory_search_filters_and_categories(self):
+        Product.objects.create(name="Tomato", category="Canned", price=100, stock=0)
+        Product.objects.create(name="Rice", category="Grains", price=200, stock=3, reorder_level=5)
+        Product.objects.create(name="Beans", category="Grains", price=300, stock=20, reorder_level=5)
+
+        searched = self.client_api.get("/api/v1/products/?search=rice").json()
+        self.assertEqual([item["name"] for item in searched["results"]], ["Rice"])
+
+        low = self.client_api.get("/api/v1/products/?stock_status=low_stock").json()
+        self.assertEqual([item["name"] for item in low["results"]], ["Rice"])
+
+        categories = self.client_api.get("/api/v1/products/categories/").json()
+        self.assertEqual(categories, ["Canned", "Grains"])
 
     def test_update_and_delete_product(self):
         created = self.client_api.post(

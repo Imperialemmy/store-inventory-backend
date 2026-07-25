@@ -7,6 +7,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.filters import OrderingFilter, SearchFilter
+from django_filters import rest_framework as filters
 
 from users.permissions import AdminWriteOrReadOnly, SellerWriteOrReadOnly
 from inventory.models import Product, AuditLog, InventoryMovement
@@ -125,25 +127,65 @@ class OperationsSummaryView(APIView):
 
 
 class CustomPagination(PageNumberPagination):
-    page_size = 10
+    page_size = 25
     page_size_query_param = 'page_size'
     max_page_size = 1000
 
     def get_paginated_response(self, data):
         return Response({
             'count': self.page.paginator.count,
+            'page': self.page.number,
+            'page_size': self.get_page_size(self.request),
+            'total_pages': self.page.paginator.num_pages,
             'next': self.get_next_link(),
             'previous': self.get_previous_link(),
             'results': data,
         })
 
 
+class ProductFilter(filters.FilterSet):
+    category = filters.CharFilter(field_name="category", lookup_expr="iexact")
+    stock_status = filters.CharFilter(method="filter_stock_status")
+
+    def filter_stock_status(self, queryset, _name, value):
+        if value == "in_stock":
+            return queryset.filter(stock__gt=models.F("reorder_level"))
+        if value == "low_stock":
+            return queryset.filter(
+                stock__gt=0,
+                stock__lte=models.F("reorder_level"),
+            )
+        if value == "out_of_stock":
+            return queryset.filter(stock__lte=0)
+        return queryset
+
+    class Meta:
+        model = Product
+        fields = ["category", "stock_status"]
+
+
 class ProductViewSet(AuditLogMixin, ModelViewSet):
-    """Products: full CRUD. Returned unpaginated, A–Z (model ordering);
-    the frontend filters client-side."""
+    """Products: CRUD plus searchable, filterable, paginated directory reads."""
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
     permission_classes = [AdminWriteOrReadOnly]
+    pagination_class = CustomPagination
+    filter_backends = [filters.DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = ProductFilter
+    search_fields = ["name"]
+    ordering_fields = ["name", "stock", "updated_at"]
+    ordering = ["name"]
+
+    @action(detail=False, methods=["get"])
+    def categories(self, request):
+        categories = (
+            self.get_queryset()
+            .exclude(category="")
+            .values_list("category", flat=True)
+            .distinct()
+            .order_by("category")
+        )
+        return Response(list(categories))
 
     @transaction.atomic
     def perform_create(self, serializer):
@@ -208,6 +250,11 @@ class CustomerViewSet(AuditLogMixin, ModelViewSet):
     serializer_class = CustomerSerializer
     permission_classes = [SellerWriteOrReadOnly]
     pagination_class = CustomPagination
+    filter_backends = [filters.DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ["city", "is_active"]
+    search_fields = ["name", "phone_number", "city"]
+    ordering_fields = ["name", "created_at", "updated_at"]
+    ordering = ["name"]
 
     @action(detail=False, methods=["get"], url_path="walk-in")
     def walk_in(self, request):
