@@ -5,7 +5,7 @@ from .views import (
     HealthView, RealtimeTicketView, OperationsSummaryView, InventoryMovementViewSet,
 )
 from sales.views import SaleViewSet, PaymentViewSet, RefundViewSet, CreditNoteViewSet
-from users.views import UserAdminViewSet, AccountStatusView
+from users.views import UserAdminViewSet, AccountStatusView, LogoutView
 
 router = DefaultRouter()
 router.register(r'products', ProductViewSet)
@@ -23,5 +23,6 @@ urlpatterns = [
     path('operations-summary/', OperationsSummaryView.as_view(), name='operations-summary'),
     path('notifications/', NotificationsView.as_view(), name='notifications'),
     path('auth/account-status/', AccountStatusView.as_view(), name='account-status'),
+    path('auth/logout/', LogoutView.as_view(), name='logout'),
     path('', include(router.urls)),
 ]

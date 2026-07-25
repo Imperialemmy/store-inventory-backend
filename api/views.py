@@ -10,7 +10,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.filters import OrderingFilter, SearchFilter
 from django_filters import rest_framework as filters
 
-from users.permissions import AdminWriteOrReadOnly, SellerWriteOrReadOnly
+from users.permissions import AdminWriteOrReadOnly, CustomerAccess
 from inventory.models import Product, AuditLog, InventoryMovement
 from inventory.services import adjust_inventory
 from customers.models import Customer
@@ -248,7 +248,7 @@ class CustomerViewSet(AuditLogMixin, ModelViewSet):
 
     queryset = Customer.objects.prefetch_related("tags").all()
     serializer_class = CustomerSerializer
-    permission_classes = [SellerWriteOrReadOnly]
+    permission_classes = [CustomerAccess]
     pagination_class = CustomPagination
     filter_backends = [filters.DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ["city", "is_active"]
@@ -270,8 +270,7 @@ class CustomerViewSet(AuditLogMixin, ModelViewSet):
 
 
 class NotificationsView(APIView):
-    """Overdue-invoice alerts for the notification bell: unpaid balances
-    older than `overdue_days` (default 14)."""
+    """Operational alerts for stock and overdue customer balances."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -284,6 +283,18 @@ class NotificationsView(APIView):
         cutoff = today - timedelta(days=overdue_days)
 
         items = []
+        low_stock_products = Product.objects.filter(
+            stock__lte=models.F("reorder_level")
+        ).order_by("stock", "name")
+        for product in low_stock_products:
+            status_label = "out of stock" if product.stock <= 0 else f"low on stock ({product.stock} left)"
+            stock_status = "out_of_stock" if product.stock <= 0 else "low_stock"
+            items.append({
+                "type": "low_stock",
+                "message": f"{product.name} is {status_label}.",
+                "link": f"/products?stock_status={stock_status}",
+            })
+
         sales = Sale.objects.select_related("customer").prefetch_related(
             "payments", "refunds", "credit_notes__items"
         ).filter(date__lte=cutoff)

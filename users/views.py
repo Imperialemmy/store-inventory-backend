@@ -1,9 +1,11 @@
+import uuid
+
 from rest_framework.viewsets import ReadOnlyModelViewSet
 from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import BasePermission, AllowAny
+from rest_framework.permissions import BasePermission, AllowAny, IsAuthenticated
 
 from .models import CustomUser
 from .serializers import UserAdminSerializer
@@ -25,6 +27,16 @@ class AccountStatusView(APIView):
         user = CustomUser.objects.filter(username__iexact=username).first()
         pending = bool(user and not user.is_active and user.role == CustomUser.SELLER)
         return Response({"pending": pending})
+
+
+class LogoutView(APIView):
+    """Invalidate every JWT from the current session before signing out."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        request.user.session_id = uuid.uuid4()
+        request.user.save(update_fields=["session_id"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class UserAdminViewSet(ReadOnlyModelViewSet):

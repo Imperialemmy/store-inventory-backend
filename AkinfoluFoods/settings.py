@@ -119,6 +119,15 @@ ASGI_APPLICATION = 'AkinfoluFoods.asgi.application'
 
 REDIS_URL = config('REDIS_URL', default='')
 if REDIS_URL and 'test' not in sys.argv:
+    # Share both Channels traffic and Django's security cache when the app
+    # runs on multiple processes/instances. The cache stores WebSocket ticket
+    # replay markers and API throttle counters.
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+        },
+    }
     CHANNEL_LAYERS = {
         'default': {
             'BACKEND': 'channels_redis.core.RedisChannelLayer',
@@ -188,11 +197,30 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 REST_FRAMEWORK = {
-    # 'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    # 'PAGE_SIZE': 10,
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'users.authentication.SingleSessionJWTAuthentication',
     ),
+    # Secure-by-default: a new API view must opt into public access rather
+    # than becoming public because a permission class was forgotten.
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
+    'DEFAULT_THROTTLE_CLASSES': (
+        'users.throttles.LoginRateThrottle',
+        'users.throttles.TokenRefreshRateThrottle',
+        'users.throttles.SignupRateThrottle',
+        'users.throttles.PasswordResetRateThrottle',
+        'users.throttles.AccountStatusRateThrottle',
+        'users.throttles.RealtimeTicketRateThrottle',
+    ),
+    'DEFAULT_THROTTLE_RATES': {
+        'login': config('AUTH_LOGIN_RATE', default='10/minute'),
+        'token_refresh': config('AUTH_TOKEN_REFRESH_RATE', default='30/minute'),
+        'signup': config('AUTH_SIGNUP_RATE', default='20/hour'),
+        'password_reset': config('AUTH_PASSWORD_RESET_RATE', default='5/hour'),
+        'account_status': config('AUTH_ACCOUNT_STATUS_RATE', default='20/minute'),
+        'realtime_ticket': config('AUTH_REALTIME_TICKET_RATE', default='60/minute'),
+    },
 }
 
 

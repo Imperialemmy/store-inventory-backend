@@ -1,7 +1,10 @@
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
+from unittest.mock import patch
 
 from .models import CustomUser
+from .throttles import LoginRateThrottle
 
 
 def signup(client, username, **extra):
@@ -93,6 +96,17 @@ class SingleSessionTests(TestCase):
         client_b.credentials(HTTP_AUTHORIZATION=f"JWT {second['access']}")
         self.assertEqual(client_b.get("/api/v1/products/").status_code, 200)
 
+    def test_logout_invalidates_the_current_access_token(self):
+        signup(APIClient(), "owner")
+        tokens = self._login("owner")
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"JWT {tokens['access']}")
+
+        self.assertEqual(client.post("/api/v1/auth/logout/").status_code, 204)
+        response = client.get("/api/v1/products/")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json().get("code"), "session_replaced")
+
 
 class PasswordResetEndpointTests(TestCase):
     def test_reset_password_endpoint_accepts_email(self):
@@ -101,3 +115,49 @@ class PasswordResetEndpointTests(TestCase):
             "/api/v1/auth/users/reset_password/",
             {"email": "owner@a.com"}, format="json")
         self.assertEqual(res.status_code, 204)
+
+
+class AuthenticationThrottleTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        CustomUser.objects.create_user(
+            username="rate-owner",
+            email="rate-owner@example.com",
+            password="Str0ngPass!23",
+            role=CustomUser.ADMIN,
+            is_active=True,
+        )
+
+    def tearDown(self):
+        cache.clear()
+
+    def test_repeated_login_attempts_are_throttled(self):
+        payload = {"username": "rate-owner", "password": "wrong-password"}
+
+        with patch.object(LoginRateThrottle, "rate", "2/minute", create=True):
+            client = APIClient()
+            self.assertEqual(
+                client.post("/api/v1/auth/jwt/create/", payload, format="json").status_code,
+                401,
+            )
+            self.assertEqual(
+                client.post("/api/v1/auth/jwt/create/", payload, format="json").status_code,
+                401,
+            )
+            response = client.post("/api/v1/auth/jwt/create/", payload, format="json")
+
+        self.assertEqual(response.status_code, 429)
+        self.assertIn("Retry-After", response)
+
+    def test_unrelated_health_checks_do_not_consume_login_limit(self):
+        with patch.object(LoginRateThrottle, "rate", "1/minute", create=True):
+            client = APIClient()
+            for _ in range(3):
+                self.assertEqual(client.get("/api/v1/health/").status_code, 200)
+            response = client.post(
+                "/api/v1/auth/jwt/create/",
+                {"username": "rate-owner", "password": "wrong-password"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 401)

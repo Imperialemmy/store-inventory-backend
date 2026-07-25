@@ -10,6 +10,7 @@ from django_filters import rest_framework as filters
 
 from api.views import AuditLogMixin, CustomPagination
 from inventory.models import AuditLog
+from users.permissions import AdminOnly
 from .models import Sale, Payment, Refund, CreditNote
 from .serializers import (
     SaleSerializer, PaymentSerializer, RefundSerializer, CreditNoteSerializer,
@@ -120,7 +121,7 @@ class RefundViewSet(AuditLogMixin, ModelViewSet):
     """Record customer refund payouts. History is read through the sale."""
     queryset = Refund.objects.select_related("sale", "sale__customer", "user").all()
     serializer_class = RefundSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AdminOnly]
     http_method_names = ["post", "head", "options"]
 
 
@@ -128,5 +129,5 @@ class CreditNoteViewSet(AuditLogMixin, ModelViewSet):
     """Record returns against a sale. History is read through the sale."""
     queryset = CreditNote.objects.select_related("sale__customer").prefetch_related("items").all()
     serializer_class = CreditNoteSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AdminOnly]
     http_method_names = ["post", "head", "options"]

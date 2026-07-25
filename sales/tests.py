@@ -262,7 +262,19 @@ class SalesFlowTests(TestCase):
         }, format="json")
 
         notifications = self.client_api.get("/api/v1/notifications/").json()
-        self.assertEqual(notifications["count"], 0)
+        self.assertFalse(any(item["type"] == "overdue_invoice" for item in notifications["items"]))
+
+    def test_low_stock_products_are_reported_in_notifications(self):
+        self.product.stock = 3
+        self.product.reorder_level = 5
+        self.product.save(update_fields=["stock", "reorder_level"])
+
+        notifications = self.client_api.get("/api/v1/notifications/").json()
+        low_stock = [item for item in notifications["items"] if item["type"] == "low_stock"]
+
+        self.assertEqual(len(low_stock), 1)
+        self.assertIn("Rice 50kg", low_stock[0]["message"])
+        self.assertEqual(low_stock[0]["link"], "/products?stock_status=low_stock")
 
     def test_delete_sale_with_returns_does_not_double_restock(self):
         sale = self.create_sale(10).json()  # stock 25 -> 15
@@ -484,6 +496,36 @@ class RolePermissionTests(TestCase):
     def test_only_admin_can_list_users(self):
         self.assertEqual(self._client(self.seller).get("/api/v1/users/").status_code, 403)
         self.assertEqual(self._client(self.admin).get("/api/v1/users/").status_code, 200)
+
+    def test_seller_can_edit_but_cannot_delete_customers(self):
+        customer = Customer.objects.create(user=self.admin, name="Protected customer")
+        client = self._client(self.seller)
+
+        self.assertEqual(client.patch(
+            f"/api/v1/customers/{customer.id}/", {"city": "Lagos"}, format="json"
+        ).status_code, 200)
+        self.assertEqual(client.delete(f"/api/v1/customers/{customer.id}/").status_code, 403)
+        self.assertTrue(Customer.objects.filter(id=customer.id).exists())
+
+    def test_seller_can_record_payment_but_not_returns_or_refunds(self):
+        product = Product.objects.create(name="Restricted item", price=Decimal("1000"), stock=10)
+        customer = Customer.objects.create(user=self.seller, name="Seller customer")
+        client = self._client(self.seller)
+        sale = client.post("/api/v1/sales/", {
+            "customer": customer.id,
+            "items": [{"product": product.id, "quantity": 2}],
+        }, format="json").json()
+
+        self.assertEqual(client.post("/api/v1/payments/", {
+            "sale": sale["id"], "amount": "1000", "method": "cash",
+        }, format="json").status_code, 201)
+        self.assertEqual(client.post("/api/v1/credit-notes/", {
+            "sale": sale["id"],
+            "items": [{"sale_item": sale["items"][0]["id"], "quantity": 1}],
+        }, format="json").status_code, 403)
+        self.assertEqual(client.post("/api/v1/refunds/", {
+            "sale": sale["id"], "amount": "1", "method": "cash",
+        }, format="json").status_code, 403)
 
     def test_walk_in_customer_is_reused_not_duplicated(self):
         client = self._client(self.seller)
