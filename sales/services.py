@@ -4,7 +4,7 @@ from django.db.models import Sum
 from django.utils.timezone import localtime, now
 from django.conf import settings
 from rest_framework.exceptions import ValidationError
-from inventory.models import Product, InventoryMovement
+from inventory.models import Product, InventoryMovement, StockReservation
 from .models import Sale, SaleItem, Payment, Refund, CreditNote, CreditNoteItem
 
 
@@ -51,8 +51,12 @@ def create_sale(*, user, customer, items, discount=Decimal("0"),
     sale.date = date if date is not None else localtime(sale.sold_at).date()
     sale.save()
 
+    # Every stock-changing transaction locks product rows in primary-key
+    # order. This keeps multi-product checkouts and cart reservations from
+    # deadlocking each other when their input order differs.
+    sorted_items = sorted(items, key=lambda row: row["product"].pk)
     seen_products = set()
-    for row in items:
+    for row in sorted_items:
         product = row["product"]
         if product.pk in seen_products:
             raise ValidationError(f"{product.name} appears more than once in this sale.")
@@ -61,11 +65,21 @@ def create_sale(*, user, customer, items, discount=Decimal("0"),
         if quantity <= 0:
             raise ValidationError("Item quantity must be greater than zero.")
 
-        # Lock the product row and check stock.
+        # Lock the product row and respect stock held by other connected carts.
         product = Product.objects.select_for_update().get(pk=product.pk)
-        if quantity > product.stock and not offline_created:
+        reservation_query = StockReservation.objects.select_for_update().filter(
+            product=product, expires_at__gt=now()
+        )
+        own_reservation = reservation_query.filter(user=user, device_id=device_id) if device_id else reservation_query.none()
+        own_reserved_quantity = own_reservation.aggregate(total=Sum("quantity"))["total"] or 0
+        reserved_elsewhere = reservation_query.exclude(
+            user=user, device_id=device_id
+        ).aggregate(total=Sum("quantity"))["total"] or 0
+        available_stock = product.stock - reserved_elsewhere
+        reservation_covers_sale = own_reserved_quantity >= quantity
+        if quantity > available_stock and not offline_created and not reservation_covers_sale:
             raise ValidationError(
-                f"Not enough stock for {product.name}: short by {quantity - product.stock} unit(s)."
+                f"Not enough available stock for {product.name}: short by {quantity - available_stock} unit(s)."
             )
 
         unit_price = row.get("unit_price")
@@ -96,8 +110,12 @@ def create_sale(*, user, customer, items, discount=Decimal("0"),
             event_at=sale.sold_at,
             synced_at=sale.synced_at,
         )
-        if product.stock < 0:
+        # Offline sales are preserved, but consuming units promised to a live
+        # cart is still an explicit reconciliation conflict even before the
+        # physical count becomes negative.
+        if product.stock < 0 or (offline_created and quantity > available_stock):
             sale.inventory_attention = True
+        own_reservation.delete()
 
     sale.recalculate()
     if sale.inventory_attention or sale.pricing_attention:

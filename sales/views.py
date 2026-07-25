@@ -5,6 +5,8 @@ from django.db import IntegrityError
 from decimal import Decimal, InvalidOperation
 from rest_framework.permissions import IsAuthenticated, BasePermission
 from rest_framework.filters import OrderingFilter, SearchFilter
+from rest_framework.decorators import action
+from django.utils.timezone import now
 from django_filters.rest_framework import DjangoFilterBackend
 from django_filters import rest_framework as filters
 
@@ -104,6 +106,40 @@ class SaleViewSet(AuditLogMixin, ModelViewSet):
         instance._acting_user = self.request.user
         self._log(AuditLog.DELETE, instance)
         delete_sale(instance)
+
+    @action(detail=True, methods=["post"], permission_classes=[AdminOnly], url_path="resolve-stock-conflict")
+    def resolve_stock_conflict(self, request, pk=None):
+        sale = self.get_object()
+        if not sale.inventory_attention:
+            return Response({"detail": "This invoice has no stock conflict."}, status=400)
+        if sale.inventory_resolution:
+            return Response({
+                "detail": "This stock conflict has already been reconciled."
+            }, status=status.HTTP_409_CONFLICT)
+        resolution = str(request.data.get("resolution") or "").strip()
+        choices = {choice[0] for choice in sale.INVENTORY_RESOLUTION_CHOICES}
+        if resolution not in choices:
+            return Response({"detail": "Choose a valid stock-conflict resolution."}, status=400)
+        note = str(request.data.get("note") or "").strip()
+        if not note:
+            return Response({"detail": "Add a short reconciliation note."}, status=400)
+        if resolution == "stock_corrected":
+            negative_products = sale.items.filter(product__stock__lt=0).values_list("product__name", flat=True)
+            if negative_products:
+                return Response({
+                    "detail": f"Correct or restock these products first: {', '.join(negative_products)}."
+                }, status=400)
+        before = self._snapshot(sale)
+        sale.inventory_resolution = resolution
+        sale.inventory_resolution_note = note[:255]
+        sale.inventory_resolved_by = request.user
+        sale.inventory_resolved_at = now()
+        sale.save(update_fields=[
+            "inventory_resolution", "inventory_resolution_note",
+            "inventory_resolved_by", "inventory_resolved_at", "updated_at",
+        ])
+        self._log(AuditLog.UPDATE, sale, {"before": before, "after": self._snapshot(sale)})
+        return Response(self.get_serializer(sale).data)
 
 
 class PaymentViewSet(AuditLogMixin, ModelViewSet):

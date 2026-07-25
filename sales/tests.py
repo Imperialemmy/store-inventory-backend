@@ -6,7 +6,7 @@ from rest_framework.test import APIClient
 
 from users.models import CustomUser
 from customers.models import Customer
-from inventory.models import Product
+from inventory.models import Product, StockReservation
 from .models import Sale, Refund
 from inventory.models import InventoryMovement
 
@@ -342,6 +342,123 @@ class SalesFlowTests(TestCase):
         self.assertEqual(movement.quantity, -30)
         self.assertEqual(movement.stock_after, -5)
 
+    def test_connected_cart_reservation_protects_the_final_unit(self):
+        self.product.stock = 1
+        self.product.save(update_fields=["stock"])
+        seller = CustomUser.objects.create_user(
+            username="reserve-seller", email="reserve@example.com", password="x", role="seller"
+        )
+        other_client = APIClient()
+        other_client.force_authenticate(seller)
+
+        first = self.client_api.post("/api/v1/stock-reservations/", {
+            "device_id": "admin-till",
+            "items": [{"product": self.product.id, "quantity": 1}],
+        }, format="json")
+        second = other_client.post("/api/v1/stock-reservations/", {
+            "device_id": "seller-till",
+            "items": [{"product": self.product.id, "quantity": 1}],
+        }, format="json")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.json()["offline_stock_safety_threshold"], 2)
+        self.assertEqual(second.status_code, 409)
+        self.assertEqual(second.json()["conflicts"][0]["available"], 0)
+
+        sale = self.client_api.post("/api/v1/sales/", {
+            "customer": self.customer.id,
+            "device_id": "admin-till",
+            "offline_created": False,
+            "items": [{"product": self.product.id, "quantity": 1}],
+        }, format="json")
+        self.assertEqual(sale.status_code, 201)
+        self.assertEqual(StockReservation.objects.count(), 0)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 0)
+
+    def test_connected_sale_cannot_use_stock_reserved_by_another_cart(self):
+        self.product.stock = 1
+        self.product.save(update_fields=["stock"])
+        self.client_api.post("/api/v1/stock-reservations/", {
+            "device_id": "reserved-till",
+            "items": [{"product": self.product.id, "quantity": 1}],
+        }, format="json")
+        response = self.client_api.post("/api/v1/sales/", {
+            "customer": self.customer.id,
+            "device_id": "different-till",
+            "offline_created": False,
+            "items": [{"product": self.product.id, "quantity": 1}],
+        }, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 1)
+
+    def test_offline_sale_against_a_live_reservation_is_preserved_and_flagged(self):
+        self.product.stock = 1
+        self.product.save(update_fields=["stock"])
+        self.client_api.post("/api/v1/stock-reservations/", {
+            "device_id": "connected-till",
+            "items": [{"product": self.product.id, "quantity": 1}],
+        }, format="json")
+        offline = self.client_api.post("/api/v1/sales/", {
+            "customer": self.customer.id,
+            "device_id": "offline-till",
+            "offline_created": True,
+            "items": [{"product": self.product.id, "quantity": 1}],
+        }, format="json")
+        self.assertEqual(offline.status_code, 201)
+        self.assertTrue(offline.json()["inventory_attention"])
+
+        reserved = self.client_api.post("/api/v1/sales/", {
+            "customer": self.customer.id,
+            "device_id": "connected-till",
+            "offline_created": False,
+            "items": [{"product": self.product.id, "quantity": 1}],
+        }, format="json")
+        self.assertEqual(reserved.status_code, 201)
+        self.assertTrue(reserved.json()["inventory_attention"])
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, -1)
+
+    def test_admin_reconciles_preserved_offline_stock_conflict(self):
+        self.product.stock = 1
+        self.product.save(update_fields=["stock"])
+        response = self.client_api.post("/api/v1/sales/", {
+            "customer": self.customer.id,
+            "device_id": "offline-till",
+            "offline_created": True,
+            "items": [{"product": self.product.id, "quantity": 2}],
+        }, format="json")
+        sale_id = response.json()["id"]
+        self.assertTrue(response.json()["inventory_attention"])
+
+        notifications = self.client_api.get("/api/v1/notifications/").json()["items"]
+        self.assertTrue(any(item["type"] == "stock_conflict" and item["link"] == f"/sales/{sale_id}" for item in notifications))
+        self.assertEqual(
+            self.client_api.get("/api/v1/operations-summary/").json()["inventory_attention_count"], 1
+        )
+
+        premature = self.client_api.post(f"/api/v1/sales/{sale_id}/resolve-stock-conflict/", {
+            "resolution": "stock_corrected", "note": "Count checked",
+        }, format="json")
+        self.assertEqual(premature.status_code, 400)
+
+        resolved = self.client_api.post(f"/api/v1/sales/{sale_id}/resolve-stock-conflict/", {
+            "resolution": "backorder", "note": "Customer accepted next delivery",
+        }, format="json")
+        self.assertEqual(resolved.status_code, 200)
+        self.assertEqual(resolved.json()["inventory_resolution"], "backorder")
+        repeated = self.client_api.post(f"/api/v1/sales/{sale_id}/resolve-stock-conflict/", {
+            "resolution": "accepted_negative", "note": "Overwrite the original decision",
+        }, format="json")
+        self.assertEqual(repeated.status_code, 409)
+        self.assertEqual(
+            Sale.objects.get(pk=sale_id).inventory_resolution, "backorder"
+        )
+        self.assertEqual(
+            self.client_api.get("/api/v1/operations-summary/").json()["inventory_attention_count"], 0
+        )
+
     def test_invalid_initial_payment_rolls_back_sale_stock_and_movement(self):
         res = self.client_api.post("/api/v1/sales/", {
             "client_sale_id": "294be58a-4499-4eb1-873d-ecc61acf50dd",
@@ -526,6 +643,20 @@ class RolePermissionTests(TestCase):
         self.assertEqual(client.post("/api/v1/refunds/", {
             "sale": sale["id"], "amount": "1", "method": "cash",
         }, format="json").status_code, 403)
+
+    def test_seller_cannot_resolve_stock_conflicts(self):
+        product = Product.objects.create(name="Conflict item", price=Decimal("100"), stock=0)
+        customer = Customer.objects.create(user=self.seller, name="Conflict customer")
+        client = self._client(self.seller)
+        sale = client.post("/api/v1/sales/", {
+            "customer": customer.id,
+            "offline_created": True,
+            "items": [{"product": product.id, "quantity": 1}],
+        }, format="json").json()
+        response = client.post(f"/api/v1/sales/{sale['id']}/resolve-stock-conflict/", {
+            "resolution": "backorder", "note": "Not authorized",
+        }, format="json")
+        self.assertEqual(response.status_code, 403)
 
     def test_walk_in_customer_is_reused_not_duplicated(self):
         client = self._client(self.seller)

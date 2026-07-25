@@ -1,7 +1,11 @@
 from rest_framework.viewsets import ModelViewSet
+from datetime import timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import models, transaction
+from django.db.models import Sum
+from django.utils.timezone import now
 from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -11,7 +15,7 @@ from rest_framework.filters import OrderingFilter, SearchFilter
 from django_filters import rest_framework as filters
 
 from users.permissions import AdminWriteOrReadOnly, CustomerAccess
-from inventory.models import Product, AuditLog, InventoryMovement
+from inventory.models import Product, AuditLog, InventoryMovement, StockReservation
 from inventory.services import adjust_inventory
 from customers.models import Customer
 from .serializers import (
@@ -86,6 +90,88 @@ class RealtimeTicketView(APIView):
         return Response({"ticket": create_websocket_ticket(request.user)})
 
 
+class StockReservationView(APIView):
+    """Atomically replace the current device's connected-cart reservations."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        device_id = str(request.data.get("device_id") or "").strip()
+        raw_items = request.data.get("items", [])
+        if not device_id or len(device_id) > 100:
+            return Response({"detail": "A valid device ID is required."}, status=400)
+        if not isinstance(raw_items, list):
+            return Response({"detail": "Items must be a list."}, status=400)
+
+        requested = {}
+        try:
+            for row in raw_items:
+                product_id = int(row["product"])
+                quantity = int(row["quantity"])
+                if quantity <= 0 or product_id in requested:
+                    raise ValueError
+                requested[product_id] = quantity
+        except (TypeError, ValueError, KeyError):
+            return Response({"detail": "Each product needs one positive whole-number quantity."}, status=400)
+
+        current_time = now()
+        expires_at = current_time + timedelta(seconds=settings.STOCK_RESERVATION_SECONDS)
+        with transaction.atomic():
+            StockReservation.objects.filter(expires_at__lte=current_time).delete()
+            products = {
+                product.pk: product
+                for product in Product.objects.select_for_update().filter(pk__in=sorted(requested))
+            }
+            if len(products) != len(requested):
+                return Response({"detail": "One or more products are no longer available."}, status=400)
+
+            own = StockReservation.objects.select_for_update().filter(
+                user=request.user, device_id=device_id
+            )
+            conflicts = []
+            availability = []
+            for product_id, quantity in requested.items():
+                product = products[product_id]
+                reserved_elsewhere = StockReservation.objects.filter(
+                    product_id=product_id, expires_at__gt=current_time
+                ).exclude(user=request.user, device_id=device_id).aggregate(
+                    total=Sum("quantity")
+                )["total"] or 0
+                available = max(product.stock - reserved_elsewhere, 0)
+                if quantity > available:
+                    conflicts.append({
+                        "product": product_id,
+                        "product_name": product.name,
+                        "requested": quantity,
+                        "available": available,
+                    })
+                availability.append({
+                    "product": product_id,
+                    "stock": product.stock,
+                    "available": available,
+                })
+
+            if conflicts:
+                return Response({
+                    "detail": "Some items are no longer available in the requested quantity.",
+                    "conflicts": conflicts,
+                }, status=409)
+
+            own.exclude(product_id__in=requested).delete()
+            for product_id, quantity in requested.items():
+                StockReservation.objects.update_or_create(
+                    user=request.user,
+                    device_id=device_id,
+                    product_id=product_id,
+                    defaults={"quantity": quantity, "expires_at": expires_at},
+                )
+
+        return Response({
+            "reserved": availability,
+            "expires_at": expires_at,
+            "offline_stock_safety_threshold": settings.OFFLINE_STOCK_SAFETY_THRESHOLD,
+        })
+
+
 class OperationsSummaryView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -104,7 +190,9 @@ class OperationsSummaryView(APIView):
             for method in (Payment.CASH, Payment.TRANSFER, Payment.POS)
         }
         low_stock = Product.objects.filter(stock__lte=models.F("reorder_level")).count()
-        attention = Sale.objects.filter(inventory_attention=True).count()
+        attention = Sale.objects.filter(
+            inventory_attention=True, inventory_resolution=""
+        ).count()
         outstanding_sales = Sale.objects.prefetch_related(
             "payments", "refunds", "credit_notes__items"
         ).all()
@@ -293,6 +381,16 @@ class NotificationsView(APIView):
                 "type": "low_stock",
                 "message": f"{product.name} is {status_label}.",
                 "link": f"/products?stock_status={stock_status}",
+            })
+
+        conflicts = Sale.objects.select_related("customer").filter(
+            inventory_attention=True, inventory_resolution=""
+        ).order_by("-synced_at")
+        for sale in conflicts:
+            items.append({
+                "type": "stock_conflict",
+                "message": f"{sale.invoice_number} has an unresolved stock conflict.",
+                "link": f"/sales/{sale.id}",
             })
 
         sales = Sale.objects.select_related("customer").prefetch_related(

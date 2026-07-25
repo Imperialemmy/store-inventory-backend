@@ -132,11 +132,15 @@ class SaleSerializer(serializers.ModelSerializer):
             "refund_due", "balance", "payment_status", "return_status", "notes",
             "items", "payments", "refunds", "credit_notes", "sold_at", "synced_at", "device_id",
             "offline_created", "inventory_attention", "pricing_attention",
+            "inventory_resolution", "inventory_resolution_note",
+            "inventory_resolved_by", "inventory_resolved_at",
             "initial_payment", "created_at",
         ]
         read_only_fields = [
             "invoice_number", "subtotal", "vat_amount", "total", "synced_at",
             "inventory_attention", "pricing_attention", "created_at",
+            "inventory_resolution", "inventory_resolution_note",
+            "inventory_resolved_by", "inventory_resolved_at",
         ]
         extra_kwargs = {
             "client_sale_id": {"validators": []},

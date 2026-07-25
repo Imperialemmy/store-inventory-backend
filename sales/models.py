@@ -31,6 +31,20 @@ class Sale(models.Model):
     offline_created = models.BooleanField(default=False)
     inventory_attention = models.BooleanField(default=False)
     pricing_attention = models.BooleanField(default=False)
+    INVENTORY_RESOLUTION_CHOICES = (
+        ("stock_corrected", "Stock corrected"),
+        ("backorder", "Accepted as backorder"),
+        ("accepted_negative", "Intentional negative stock"),
+    )
+    inventory_resolution = models.CharField(
+        max_length=30, choices=INVENTORY_RESOLUTION_CHOICES, blank=True, default=""
+    )
+    inventory_resolution_note = models.CharField(max_length=255, blank=True, default="")
+    inventory_resolved_by = models.ForeignKey(
+        CustomUser, related_name="resolved_inventory_conflicts",
+        on_delete=models.SET_NULL, blank=True, null=True,
+    )
+    inventory_resolved_at = models.DateTimeField(blank=True, null=True)
 
     discount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     vat_rate = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0"))

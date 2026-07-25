@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import models
 from django.utils.timezone import now
 from users.models import CustomUser
@@ -27,6 +29,38 @@ class Product(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class StockReservation(models.Model):
+    """Short-lived stock claim for a connected point-of-sale cart.
+
+    Reservations do not alter physical stock. They only prevent another
+    connected cart from promising the same final units before checkout.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        CustomUser, related_name="stock_reservations", on_delete=models.CASCADE
+    )
+    product = models.ForeignKey(
+        Product, related_name="stock_reservations", on_delete=models.CASCADE
+    )
+    device_id = models.CharField(max_length=100)
+    quantity = models.PositiveIntegerField()
+    expires_at = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "device_id", "product"],
+                name="unique_active_cart_product_reservation",
+            ),
+        ]
+        ordering = ["expires_at"]
+
+    def __str__(self):
+        return f"{self.quantity} × {self.product} for {self.device_id}"
 
 
 class AuditLog(models.Model):

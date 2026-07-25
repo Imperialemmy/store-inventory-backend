@@ -258,6 +258,12 @@ DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='AkinFolu Foods <no-re
 # disabled except for the very first bootstrap user).
 ADMIN_SIGNUP_CODE = config('ADMIN_SIGNUP_CODE', default='')
 
+# Connected carts reserve stock briefly. Offline devices may continue selling
+# ordinary stock, but the frontend blocks offline completion at or below this
+# safety threshold so the final units require live server approval.
+STOCK_RESERVATION_SECONDS = config('STOCK_RESERVATION_SECONDS', default=120, cast=int)
+OFFLINE_STOCK_SAFETY_THRESHOLD = config('OFFLINE_STOCK_SAFETY_THRESHOLD', default=2, cast=int)
+
 SIMPLE_JWT = {
    'AUTH_HEADER_TYPES': ('JWT',),
    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
