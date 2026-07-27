@@ -5,12 +5,13 @@ from django.utils.timezone import localtime, now
 from django.conf import settings
 from rest_framework.exceptions import ValidationError
 from inventory.models import Product, InventoryMovement, StockReservation
+from inventory.quantities import parse_quarter_quantity
 from .models import Sale, SaleItem, Payment, Refund, CreditNote, CreditNoteItem
 
 
 def credited_quantity(sale_item):
     """Units of this line already returned on previous credit notes."""
-    return sale_item.credited_items.aggregate(t=Sum("quantity"))["t"] or 0
+    return sale_item.credited_items.aggregate(t=Sum("quantity"))["t"] or Decimal("0")
 
 
 @transaction.atomic
@@ -61,9 +62,10 @@ def create_sale(*, user, customer, items, discount=Decimal("0"),
         if product.pk in seen_products:
             raise ValidationError(f"{product.name} appears more than once in this sale.")
         seen_products.add(product.pk)
-        quantity = int(row["quantity"])
-        if quantity <= 0:
-            raise ValidationError("Item quantity must be greater than zero.")
+        try:
+            quantity = parse_quarter_quantity(row["quantity"])
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
 
         # Lock the product row and respect stock held by other connected carts.
         product = Product.objects.select_for_update().get(pk=product.pk)
@@ -71,10 +73,10 @@ def create_sale(*, user, customer, items, discount=Decimal("0"),
             product=product, expires_at__gt=now()
         )
         own_reservation = reservation_query.filter(user=user, device_id=device_id) if device_id else reservation_query.none()
-        own_reserved_quantity = own_reservation.aggregate(total=Sum("quantity"))["total"] or 0
+        own_reserved_quantity = own_reservation.aggregate(total=Sum("quantity"))["total"] or Decimal("0")
         reserved_elsewhere = reservation_query.exclude(
             user=user, device_id=device_id
-        ).aggregate(total=Sum("quantity"))["total"] or 0
+        ).aggregate(total=Sum("quantity"))["total"] or Decimal("0")
         available_stock = product.stock - reserved_elsewhere
         reservation_covers_sale = own_reserved_quantity >= quantity
         if quantity > available_stock and not offline_created and not reservation_covers_sale:
@@ -188,7 +190,10 @@ def create_credit_note(*, sale, items, user=None, reason=None):
 
     for row in items:
         sale_item = row["sale_item"]
-        quantity = int(row["quantity"])
+        try:
+            quantity = parse_quarter_quantity(row["quantity"])
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
         if sale_item.sale_id != sale.id:
             raise ValidationError("Item does not belong to this sale.")
         returnable = sale_item.quantity - credited_quantity(sale_item)

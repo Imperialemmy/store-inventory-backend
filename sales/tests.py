@@ -61,6 +61,31 @@ class SalesFlowTests(TestCase):
         self.assertEqual(data["results"][0]["id"], second["id"])
         self.assertNotEqual(first["id"], second["id"])
 
+    def test_quarter_sale_and_return_preserve_exact_stock_and_value(self):
+        sale_response = self.create_sale("0.25")
+        self.assertEqual(sale_response.status_code, 201)
+        sale = sale_response.json()
+        self.assertEqual(Decimal(sale["subtotal"]), Decimal("250.00"))
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, Decimal("24.7500"))
+
+        returned = self.client_api.post("/api/v1/credit-notes/", {
+            "sale": sale["id"],
+            "items": [{"sale_item": sale["items"][0]["id"], "quantity": "0.25"}],
+        }, format="json")
+        self.assertEqual(returned.status_code, 201)
+        self.assertEqual(Decimal(returned.json()["amount"]), Decimal("250.00"))
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, Decimal("25.0000"))
+
+    def test_sale_rejects_non_quarter_quantity(self):
+        response = self.create_sale("0.10")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("quarter-unit", str(response.json()).lower())
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, Decimal("25.0000"))
+        self.assertEqual(Sale.objects.count(), 0)
+
     def test_stock_decrements(self):
         self.create_sale(8)
         self.product.refresh_from_db()
@@ -341,6 +366,28 @@ class SalesFlowTests(TestCase):
         movement = InventoryMovement.objects.get(sale_id=res.json()["id"])
         self.assertEqual(movement.quantity, -30)
         self.assertEqual(movement.stock_after, -5)
+
+    def test_connected_cart_reservation_accepts_quarter_units(self):
+        self.product.stock = Decimal("1.00")
+        self.product.save(update_fields=["stock"])
+        seller = CustomUser.objects.create_user(
+            username="quarter-seller", email="quarter@example.com", password="x", role="seller"
+        )
+        other_client = APIClient()
+        other_client.force_authenticate(seller)
+
+        first = self.client_api.post("/api/v1/stock-reservations/", {
+            "device_id": "quarter-admin",
+            "items": [{"product": self.product.id, "quantity": "0.50"}],
+        }, format="json")
+        second = other_client.post("/api/v1/stock-reservations/", {
+            "device_id": "quarter-seller",
+            "items": [{"product": self.product.id, "quantity": "0.75"}],
+        }, format="json")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 409)
+        self.assertEqual(Decimal(str(second.json()["conflicts"][0]["available"])), Decimal("0.50"))
 
     def test_connected_cart_reservation_protects_the_final_unit(self):
         self.product.stock = 1

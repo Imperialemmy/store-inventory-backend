@@ -52,6 +52,53 @@ class ProductTests(TestCase):
         self.assertIn("already exists", str(res.json()).lower())
         self.assertEqual(Product.objects.count(), 1)
 
+    def test_stock_accepts_quarter_units_and_rejects_smaller_steps(self):
+        created = self.client_api.post("/api/v1/products/", {
+            "name": "Quarter stock", "price": "1000", "stock": "2.25",
+        }, format="json")
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(Decimal(str(created.json()["stock"])), Decimal("2.25"))
+
+        invalid = self.client_api.post("/api/v1/products/", {
+            "name": "Invalid stock", "price": "1000", "stock": "1.10",
+        }, format="json")
+        self.assertEqual(invalid.status_code, 400)
+        self.assertIn("quarter-unit", str(invalid.json()).lower())
+
+        product = Product.objects.get(pk=created.json()["id"])
+        restock = self.client_api.post("/api/v1/inventory-movements/", {
+            "product": product.id, "quantity": "0.50", "reason": "restock",
+        }, format="json")
+        self.assertEqual(restock.status_code, 201)
+        product.refresh_from_db()
+        self.assertEqual(product.stock, Decimal("2.7500"))
+
+    def test_legacy_fraction_allows_quarter_corrections_and_other_edits(self):
+        product = Product.objects.create(
+            name="Imported fraction", price="1000", stock=Decimal("1.1000")
+        )
+        edited = self.client_api.patch(
+            f"/api/v1/products/{product.id}/",
+            {"price": "1200", "stock": "1.1000"},
+            format="json",
+        )
+        self.assertEqual(edited.status_code, 200)
+        corrected = self.client_api.patch(
+            f"/api/v1/products/{product.id}/",
+            {"stock": "1.3500"},
+            format="json",
+        )
+        self.assertEqual(corrected.status_code, 200)
+        self.assertEqual(Decimal(str(corrected.json()["stock"])), Decimal("1.35"))
+
+        invalid = self.client_api.patch(
+            f"/api/v1/products/{product.id}/",
+            {"stock": "1.2000"},
+            format="json",
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.assertIn("quarter-unit", str(invalid.json()).lower())
+
     def test_product_str(self):
         product = Product.objects.create(name="Beans", price=Decimal("800"), stock=5)
         self.assertEqual(str(product), "Beans")

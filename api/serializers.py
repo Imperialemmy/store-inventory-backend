@@ -5,6 +5,9 @@ from customers.models import Customer, CustomerTag
 
 class ProductSerializer(serializers.ModelSerializer):
     image = serializers.ImageField(use_url=True, required=False, allow_null=True)
+    stock = serializers.DecimalField(
+        max_digits=14, decimal_places=4, coerce_to_string=False, required=False
+    )
 
     class Meta:
         model = Product
@@ -83,6 +86,12 @@ class CustomerSerializer(serializers.ModelSerializer):
 class InventoryMovementSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
     user_name = serializers.CharField(source="user.username", read_only=True)
+    quantity = serializers.DecimalField(
+        max_digits=14, decimal_places=4, coerce_to_string=False
+    )
+    stock_after = serializers.DecimalField(
+        max_digits=14, decimal_places=4, coerce_to_string=False, read_only=True
+    )
 
     class Meta:
         model = InventoryMovement

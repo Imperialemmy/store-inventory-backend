@@ -7,13 +7,15 @@ from django.utils.timezone import now
 from rest_framework.exceptions import ValidationError
 
 from .models import InventoryMovement, Product
+from .quantities import parse_quarter_quantity
 
 
 @transaction.atomic
 def adjust_inventory(*, product, quantity, reason, user=None, note="", event_at=None):
-    quantity = int(quantity)
-    if quantity == 0:
-        raise ValidationError("Inventory adjustment cannot be zero.")
+    try:
+        quantity = parse_quarter_quantity(quantity, allow_negative=True)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
     allowed = {
         InventoryMovement.OPENING,
         InventoryMovement.RESTOCK,

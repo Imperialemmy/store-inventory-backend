@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from django.db import models
 from django.utils.timezone import now, localdate
 import uuid
@@ -115,14 +115,14 @@ class Sale(models.Model):
 
     @property
     def return_status(self):
-        sold_units = sum((item.quantity for item in self.items.all()), 0)
+        sold_units = sum((item.quantity for item in self.items.all()), Decimal("0"))
         returned_units = sum(
             (
                 item.quantity
                 for note in self.credit_notes.all()
                 for item in note.items.all()
             ),
-            0,
+            Decimal("0"),
         )
         if returned_units <= 0:
             return self.RETURN_NONE
@@ -150,7 +150,7 @@ class Sale(models.Model):
 class SaleItem(models.Model):
     sale = models.ForeignKey(Sale, related_name="items", on_delete=models.CASCADE)
     product = models.ForeignKey(Product, related_name="sale_items", on_delete=models.PROTECT)
-    quantity = models.PositiveIntegerField(default=1)
+    quantity = models.DecimalField(max_digits=14, decimal_places=4, default=1)
     unit_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     def __str__(self):
@@ -158,7 +158,9 @@ class SaleItem(models.Model):
 
     @property
     def line_total(self):
-        return (self.unit_price or Decimal("0")) * self.quantity
+        return ((self.unit_price or Decimal("0")) * self.quantity).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
 
 
 class CreditNote(models.Model):
@@ -188,7 +190,7 @@ class CreditNoteItem(models.Model):
     # Cascades with its sale line: a credit note only exists in the context
     # of its sale, and sale deletion handles the stock restoration itself.
     sale_item = models.ForeignKey(SaleItem, related_name="credited_items", on_delete=models.CASCADE)
-    quantity = models.PositiveIntegerField()
+    quantity = models.DecimalField(max_digits=14, decimal_places=4)
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
 
 

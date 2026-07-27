@@ -16,7 +16,7 @@ class Product(models.Model):
     # Stock may temporarily be negative when two devices sell the final units
     # while offline. The movement ledger preserves what really happened and
     # the admin UI can resolve the resulting attention item.
-    stock = models.IntegerField(default=0)
+    stock = models.DecimalField(max_digits=14, decimal_places=4, default=0)
     reorder_level = models.PositiveIntegerField(default=5)
     cost_price = models.DecimalField(
         max_digits=10, decimal_places=2, blank=True, null=True
@@ -45,7 +45,7 @@ class StockReservation(models.Model):
         Product, related_name="stock_reservations", on_delete=models.CASCADE
     )
     device_id = models.CharField(max_length=100)
-    quantity = models.PositiveIntegerField()
+    quantity = models.DecimalField(max_digits=14, decimal_places=4)
     expires_at = models.DateTimeField(db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -122,8 +122,8 @@ class InventoryMovement(models.Model):
         CustomUser, related_name="inventory_movements",
         on_delete=models.SET_NULL, blank=True, null=True,
     )
-    quantity = models.IntegerField()
-    stock_after = models.IntegerField()
+    quantity = models.DecimalField(max_digits=14, decimal_places=4)
+    stock_after = models.DecimalField(max_digits=14, decimal_places=4)
     reason = models.CharField(max_length=20, choices=REASON_CHOICES)
     client_reference = models.CharField(
         max_length=160, unique=True, blank=True, null=True
@@ -138,4 +138,4 @@ class InventoryMovement(models.Model):
         ordering = ["-event_at", "-id"]
 
     def __str__(self):
-        return f"{self.get_reason_display()}: {self.quantity:+d} {self.product or 'deleted product'}"
+        return f"{self.get_reason_display()}: {self.quantity:+f} {self.product or 'deleted product'}"

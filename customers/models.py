@@ -13,6 +13,7 @@ class CustomerTag(models.Model):
 
 class Customer(models.Model):
     user = models.ForeignKey(CustomUser, related_name="customers", on_delete=models.CASCADE)
+    legacy_id = models.CharField(max_length=64, blank=True, null=True, unique=True)
     name = models.CharField(max_length=150)
     phone_number = models.CharField(max_length=20, blank=True, null=True)
     email = models.EmailField(blank=True, null=True)

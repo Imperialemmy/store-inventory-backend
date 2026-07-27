@@ -9,6 +9,9 @@ from .services import create_sale, create_credit_note, create_refund, credited_q
 class SaleItemSerializer(serializers.ModelSerializer):
     product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all())
     product_name = serializers.CharField(source="product.name", read_only=True)
+    quantity = serializers.DecimalField(
+        max_digits=14, decimal_places=4, coerce_to_string=False
+    )
     line_total = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     returned_quantity = serializers.SerializerMethodField()
 
@@ -73,6 +76,9 @@ class RefundSerializer(serializers.ModelSerializer):
 class CreditNoteItemSerializer(serializers.ModelSerializer):
     sale_item = serializers.PrimaryKeyRelatedField(queryset=SaleItem.objects.all())
     product_name = serializers.CharField(source="sale_item.product.name", read_only=True)
+    quantity = serializers.DecimalField(
+        max_digits=14, decimal_places=4, coerce_to_string=False
+    )
 
     class Meta:
         model = CreditNoteItem

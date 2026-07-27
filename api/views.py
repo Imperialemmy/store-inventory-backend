@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.filters import OrderingFilter, SearchFilter
 from django_filters import rest_framework as filters
@@ -17,6 +18,7 @@ from django_filters import rest_framework as filters
 from users.permissions import AdminWriteOrReadOnly, CustomerAccess
 from inventory.models import Product, AuditLog, InventoryMovement, StockReservation
 from inventory.services import adjust_inventory
+from inventory.quantities import parse_quarter_quantity, parse_stored_quantity
 from customers.models import Customer
 from .serializers import (
     ProductSerializer, CustomerSerializer, InventoryMovementSerializer,
@@ -106,12 +108,14 @@ class StockReservationView(APIView):
         try:
             for row in raw_items:
                 product_id = int(row["product"])
-                quantity = int(row["quantity"])
-                if quantity <= 0 or product_id in requested:
+                quantity = parse_quarter_quantity(row["quantity"])
+                if product_id in requested:
                     raise ValueError
                 requested[product_id] = quantity
         except (TypeError, ValueError, KeyError):
-            return Response({"detail": "Each product needs one positive whole-number quantity."}, status=400)
+            return Response({
+                "detail": "Each product needs a positive quantity in quarter-unit steps."
+            }, status=400)
 
         current_time = now()
         expires_at = current_time + timedelta(seconds=settings.STOCK_RESERVATION_SECONDS)
@@ -135,8 +139,8 @@ class StockReservationView(APIView):
                     product_id=product_id, expires_at__gt=current_time
                 ).exclude(user=request.user, device_id=device_id).aggregate(
                     total=Sum("quantity")
-                )["total"] or 0
-                available = max(product.stock - reserved_elsewhere, 0)
+                )["total"] or Decimal("0")
+                available = max(product.stock - reserved_elsewhere, Decimal("0"))
                 if quantity > available:
                     conflicts.append({
                         "product": product_id,
@@ -277,7 +281,12 @@ class ProductViewSet(AuditLogMixin, ModelViewSet):
 
     @transaction.atomic
     def perform_create(self, serializer):
-        requested_stock = int(serializer.validated_data.get("stock", 0))
+        try:
+            requested_stock = parse_quarter_quantity(
+                serializer.validated_data.get("stock", 0), allow_zero=True
+            )
+        except ValueError as exc:
+            raise ValidationError({"stock": str(exc)}) from exc
         instance = serializer.save(stock=0)
         if requested_stock:
             adjust_inventory(
@@ -294,9 +303,16 @@ class ProductViewSet(AuditLogMixin, ModelViewSet):
     def perform_update(self, serializer):
         before = self._snapshot(serializer.instance)
         old_stock = serializer.instance.stock
-        requested_stock = int(serializer.validated_data.pop("stock", old_stock))
+        try:
+            requested_stock = parse_stored_quantity(
+                serializer.validated_data.pop("stock", old_stock)
+            )
+            difference = requested_stock - old_stock
+            if difference:
+                parse_quarter_quantity(difference, allow_negative=True)
+        except ValueError as exc:
+            raise ValidationError({"stock": str(exc)}) from exc
         instance = serializer.save()
-        difference = requested_stock - old_stock
         if difference:
             adjust_inventory(
                 product=instance,
