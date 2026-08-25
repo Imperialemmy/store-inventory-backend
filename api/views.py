@@ -1,4 +1,4 @@
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 from datetime import timedelta
 from decimal import Decimal
 
@@ -15,13 +15,14 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.filters import OrderingFilter, SearchFilter
 from django_filters import rest_framework as filters
 
-from users.permissions import AdminWriteOrReadOnly, CustomerAccess
+from users.permissions import AdminWriteOrReadOnly, CustomerAccess, AdminOnly
 from inventory.models import Product, AuditLog, InventoryMovement, StockReservation
 from inventory.services import adjust_inventory
 from inventory.quantities import parse_quarter_quantity, parse_stored_quantity
 from customers.models import Customer
 from .serializers import (
     ProductSerializer, CustomerSerializer, InventoryMovementSerializer,
+    AuditLogSerializer,
 )
 from .realtime_auth import create_websocket_ticket
 import logging
@@ -326,6 +327,19 @@ class ProductViewSet(AuditLogMixin, ModelViewSet):
             "before": before,
             "after": self._snapshot(instance),
         })
+
+
+class AuditLogViewSet(ReadOnlyModelViewSet):
+    """Activity / audit trail — who created, updated or deleted what. Admins only."""
+    queryset = AuditLog.objects.select_related("user").all()
+    serializer_class = AuditLogSerializer
+    permission_classes = [AdminOnly]
+    pagination_class = CustomPagination
+    filter_backends = [filters.DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ["action", "model_name", "user"]
+    search_fields = ["object_repr", "model_name", "user__username"]
+    ordering_fields = ["timestamp"]
+    ordering = ["-timestamp"]
 
 
 class InventoryMovementViewSet(ModelViewSet):

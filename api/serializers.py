@@ -1,6 +1,32 @@
 from rest_framework import serializers
-from inventory.models import Product, InventoryMovement
+from inventory.models import Product, InventoryMovement, AuditLog
 from customers.models import Customer, CustomerTag
+
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    """Read model for the activity / audit trail."""
+    user_name = serializers.SerializerMethodField()
+    action_display = serializers.CharField(source="get_action_display", read_only=True)
+    summary = serializers.SerializerMethodField()
+
+    _VERBS = {"create": "created", "update": "updated", "delete": "deleted"}
+
+    class Meta:
+        model = AuditLog
+        fields = [
+            "id", "user_name", "action", "action_display", "model_name",
+            "object_id", "object_repr", "summary", "changes", "timestamp",
+        ]
+        read_only_fields = fields
+
+    def get_user_name(self, obj):
+        return obj.user.username if obj.user else "System"
+
+    def get_summary(self, obj):
+        who = obj.user.username if obj.user else "System"
+        verb = self._VERBS.get(obj.action, obj.action)
+        target = obj.model_name + (f" {obj.object_repr}" if obj.object_repr else "")
+        return f"{who} {verb} {target}".strip()
 
 
 class ProductSerializer(serializers.ModelSerializer):

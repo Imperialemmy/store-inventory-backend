@@ -107,3 +107,39 @@ class RealtimeActivityTests(TransactionTestCase):
             self.assertEqual(close_code, 4401)
 
         async_to_sync(scenario)()
+
+
+class AuditLogApiTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        self.admin = CustomUser.objects.create_user(
+            username="audit-admin", email="aa@example.com", password="x",
+            role=CustomUser.ADMIN, is_active=True)
+        self.seller = CustomUser.objects.create_user(
+            username="audit-seller", email="as@example.com", password="x",
+            role=CustomUser.SELLER, is_active=True)
+
+    def _client(self, user):
+        client = APIClient()
+        client.force_authenticate(user)
+        return client
+
+    def test_admin_sees_audit_trail_with_summary(self):
+        admin = self._client(self.admin)
+        created = admin.post("/api/v1/products/", {
+            "name": "Audited item", "price": "100", "stock": 5,
+        }, format="json")
+        self.assertEqual(created.status_code, 201)
+
+        res = admin.get("/api/v1/audit-logs/")
+        self.assertEqual(res.status_code, 200)
+        entries = res.json()["results"]
+        self.assertTrue(any(
+            e["action"] == "create" and e["model_name"] == "Product"
+            and "audit-admin" in e["summary"]
+            for e in entries
+        ))
+
+    def test_seller_cannot_read_audit_trail(self):
+        self.assertEqual(self._client(self.seller).get("/api/v1/audit-logs/").status_code, 403)
