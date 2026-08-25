@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     ProductViewSet, CustomerViewSet, NotificationsView,
     HealthView, RealtimeTicketView, OperationsSummaryView, InventoryMovementViewSet,
-    StockReservationView,
+    StockReservationView, AuditLogViewSet,
 )
 from sales.views import SaleViewSet, PaymentViewSet, RefundViewSet, CreditNoteViewSet
 from users.views import UserAdminViewSet, AccountStatusView, LogoutView
@@ -17,6 +17,7 @@ router.register(r'refunds', RefundViewSet)
 router.register(r'credit-notes', CreditNoteViewSet)
 router.register(r'users', UserAdminViewSet)
 router.register(r'inventory-movements', InventoryMovementViewSet)
+router.register(r'audit-logs', AuditLogViewSet)
 
 urlpatterns = [
     path('health/', HealthView.as_view(), name='health'),
