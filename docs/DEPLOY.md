@@ -19,14 +19,18 @@ PR). You can also trigger it manually from the repo's **Actions** tab
 
 Add these under **Settings → Secrets and variables → Actions → New repository secret**:
 
-| Secret | Value | Example |
-| --- | --- | --- |
-| `VPS_HOST` | Server IP or hostname | `157.230.229.31` |
-| `VPS_USER` | SSH user | `root` |
-| `VPS_SSH_KEY` | **Private** key whose public key is in the server's `~/.ssh/authorized_keys` | (full PEM contents) |
-| `VPS_PROJECT_DIR` | Absolute path to the backend project on the server | `/root/store-inventory-backend` |
-| `VPS_SERVICE` | systemd unit name that runs the app | `akinfolu` / `gunicorn` / `daphne` |
-| `VPS_PORT` | (optional) SSH port, defaults to `22` | `22` |
+| Secret | Required? | Value | Example |
+| --- | --- | --- | --- |
+| `VPS_HOST` | **yes** | Server IP or hostname | `157.230.229.31` |
+| `VPS_USER` | **yes** | SSH user | `root` |
+| `VPS_SSH_KEY` | **yes** | **Private** key whose public key is in the server's `~/.ssh/authorized_keys` | (full PEM contents) |
+| `VPS_PROJECT_DIR` | optional | Backend path; defaults to `/srv/store/store-inventory-backend` | `/srv/store/store-inventory-backend` |
+| `VPS_SERVICE` | optional | systemd unit name; if unset the workflow auto-detects it (or falls back to supervisor) | `gunicorn` / `daphne` |
+| `VPS_PORT` | optional | SSH port, defaults to `22` | `22` |
+
+Only the first three are required. The project directory defaults to the
+known path, and the restart step auto-detects the systemd unit whose
+definition references that directory (or restarts supervisor programs).
 
 ## One-time key setup
 

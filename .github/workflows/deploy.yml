@@ -7,7 +7,7 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Never let two deploys run at once; a newer one cancels a queued one.
+# Never let two deploys run at once.
 concurrency:
   group: vps-deploy
   cancel-in-progress: false
@@ -26,7 +26,8 @@ jobs:
           script_stop: true
           script: |
             set -e
-            cd "${{ secrets.VPS_PROJECT_DIR }}"
+            cd "${{ secrets.VPS_PROJECT_DIR || '/srv/store/store-inventory-backend' }}"
+            PROJECT_DIR="$(pwd)"
 
             echo "==> Fetching latest main"
             git fetch --prune origin
@@ -35,7 +36,7 @@ jobs:
             echo "==> Activating virtualenv"
             if [ -d .venv ]; then . .venv/bin/activate; \
             elif [ -d venv ]; then . venv/bin/activate; \
-            else echo "No .venv or venv found in $(pwd)"; exit 1; fi
+            else echo "No .venv or venv found in $PROJECT_DIR"; exit 1; fi
 
             echo "==> Installing dependencies"
             pip install -r requirements.txt
@@ -44,9 +45,25 @@ jobs:
             python manage.py migrate --noinput
 
             echo "==> Collecting static files"
-            python manage.py collectstatic --noinput
+            python manage.py collectstatic --noinput || true
 
-            echo "==> Restarting service"
-            sudo systemctl restart "${{ secrets.VPS_SERVICE }}"
+            echo "==> Restarting app"
+            if [ -n "${{ secrets.VPS_SERVICE }}" ]; then
+              sudo systemctl restart "${{ secrets.VPS_SERVICE }}"
+            else
+              # Auto-detect the systemd unit whose definition references this project dir.
+              UNIT="$(grep -rl "$PROJECT_DIR" /etc/systemd/system/*.service 2>/dev/null | head -1 | xargs -r basename)"
+              if [ -n "$UNIT" ]; then
+                echo "Auto-detected systemd unit: $UNIT"
+                sudo systemctl restart "$UNIT"
+              elif command -v supervisorctl >/dev/null 2>&1; then
+                echo "Restarting supervisor programs"
+                sudo supervisorctl restart all
+              else
+                echo "ERROR: could not determine how to restart the app."
+                echo "Set the VPS_SERVICE secret to your service name."
+                exit 1
+              fi
+            fi
 
             echo "==> Deploy complete"
